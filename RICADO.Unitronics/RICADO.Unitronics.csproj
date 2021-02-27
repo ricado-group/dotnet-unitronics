@@ -21,4 +21,8 @@
     </None>
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="RICADO.Sockets" Version="1.0.1" />
+  </ItemGroup>
+
 </Project>
