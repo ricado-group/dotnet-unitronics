@@ -42,6 +42,8 @@ namespace RICADO.Unitronics
 
         internal Guid InternalUniqueID => _internalUniqueId;
 
+        internal ushort BufferSize => IsEnhanced ? 1000 : 496;
+
         internal bool IsBasic => _model switch
         {
             PLCModel.M90 => true,
@@ -284,14 +286,39 @@ namespace RICADO.Unitronics
                 throw new ArgumentNullException(nameof(request));
             }
 
-            // TODO: Validate the Request is within the Bounds (and Operand Types) for this PLC Model
+            foreach (KeyValuePair<OperandType, HashSet<ushort>> operandAddresses in request.OperandAddresses)
+            {
+                validateOperandsRequest(operandAddresses.Key, operandAddresses.Value);
+            }
 
-            throw new NotImplementedException();
+            ReadOperandsResult result = new ReadOperandsResult();
+
+            //if((IsEnhanced && Version.Major >= 3) || (IsStandard && Version.Major >= 5 && Version.Minor >= 3))
+            if(false)
+            {
+                // PComB
+            }
+            else
+            {
+                foreach(PComA.ReadOperandsMessage message in PComA.BuildReadOperandsMessages(_unitId, request.OperandAddresses, BufferSize))
+                {
+                    ProcessMessageResult messageResult = await _channel.ProcessMessageAsync(message.BuildRequestMessage(), ProtocolType.PComA, _unitId, _timeout, _retries, cancellationToken);
+
+                    result.AddMessageResult(messageResult);
+
+                    object[] operandValues = message.UnpackResponseMessage(messageResult.ResponseMessage);
+
+                    for(int i = 0; i < operandValues.Length; i++)
+                    {
+                        result.AddValue(message.Type, (ushort)(message.StartAddress + i), operandValues[i]);
+                    }
+                }
+            }
+
+            return result;
         }
 
-        public WriteOperandsRequest CreateWriteOperandsRequest() => new WriteOperandsRequest(this);
-
-        public async Task<WriteOperandsResult> WriteOperandsAsync(WriteOperandsRequest request, CancellationToken cancellationToken)
+        public async Task<WriteOperandResult> WriteOperandAsync(OperandType type, ushort address, object value, CancellationToken cancellationToken)
         {
             lock (_isInitializedLock)
             {
@@ -301,14 +328,48 @@ namespace RICADO.Unitronics
                 }
             }
 
-            if(request == null)
+            if(value == null)
             {
-                throw new ArgumentNullException(nameof(request));
+                throw new ArgumentNullException(nameof(value));
             }
 
-            // TODO: Validate the Request is within the Bounds (and Operand Types) for this PLC Model
+            validateOperandsRequest(type, new ushort[] { address });
 
-            throw new NotImplementedException();
+            validateWriteOperandRequest(type, address, value);
+
+            ReadOnlyMemory<byte> requestMessage;
+            ProtocolType protocolType;
+
+            if((IsEnhanced && Version.Major >= 3) || (IsStandard && Version.Major >= 5 && Version.Minor >= 3))
+            {
+                requestMessage = PComB.BuildWriteOperandMessage(_unitId, type, address, value);
+                protocolType = ProtocolType.PComB;
+            }
+            else
+            {
+                requestMessage = PComA.BuildWriteOperandMessage(_unitId, type, address, value);
+                protocolType = ProtocolType.PComA;
+            }
+
+            ProcessMessageResult result = await _channel.ProcessMessageAsync(requestMessage, protocolType, _unitId, _timeout, _retries, cancellationToken);
+
+            if (protocolType == ProtocolType.PComA)
+            {
+                PComA.ValidateWriteOperandMessage(_unitId, type, result.ResponseMessage);
+            }
+            else if (protocolType == ProtocolType.PComB)
+            {
+                PComB.ValidateWriteOperandMessage(_unitId, type, result.ResponseMessage);
+            }
+
+            return new WriteOperandResult
+            {
+                BytesSent = result.BytesSent,
+                PacketsSent = result.PacketsSent,
+                BytesReceived = result.BytesReceived,
+                PacketsReceived = result.PacketsReceived,
+                Duration = result.Duration,
+            };
         }
 
         public async Task<ReadClockResult> ReadClockAsync(CancellationToken cancellationToken)
@@ -670,14 +731,413 @@ namespace RICADO.Unitronics
             return PLCModel.Unknown;
         }
 
-        private bool validateReadOperandsRequest()
+        private void validateOperandsRequest(OperandType type, ICollection<ushort> addresses)
         {
-            throw new NotImplementedException();
+            if(addresses.Count == 0 || _model == PLCModel.Unknown)
+            {
+                return;
+            }
+
+            ushort maximumAddress = ushort.MaxValue;
+            
+            if(IsBasic)
+            {
+                switch(type)
+                {
+                    case OperandType.MB:
+                    case OperandType.SB:
+                    case OperandType.MI:
+                    case OperandType.SI:
+                        maximumAddress = 255;
+                        break;
+
+                    case OperandType.Input:
+                    case OperandType.Output:
+                        maximumAddress = 159;
+                        break;
+
+                    case OperandType.TimerCurrent:
+                    case OperandType.TimerPreset:
+                    case OperandType.TimerRunBit:
+                        maximumAddress = 63;
+                        break;
+
+                    default:
+                        throw new UnitronicsException("The '" + type + "' Operand Type is not supported by this '" + _model + "' Unitronics PLC");
+                }
+            }
+
+            if(IsStandard)
+            {
+                switch (type)
+                {
+                    case OperandType.MB:
+                        maximumAddress = 4095;
+                        break;
+
+                    case OperandType.MI:
+                        maximumAddress = 2047;
+                        break;
+
+                    case OperandType.SB:
+                    case OperandType.SI:
+                        maximumAddress = 511;
+                        break;
+
+                    case OperandType.ML:
+                        maximumAddress = 255;
+                        break;
+
+                    case OperandType.SL:
+                        maximumAddress = 55;
+                        break;
+
+                    case OperandType.MF:
+                        maximumAddress = 23;
+                        break;
+
+                    case OperandType.DW:
+                    case OperandType.SDW:
+                        maximumAddress = 63;
+                        break;
+
+                    case OperandType.Input:
+                    case OperandType.Output:
+                        maximumAddress = 543;
+                        break;
+
+                    case OperandType.TimerCurrent:
+                    case OperandType.TimerPreset:
+                    case OperandType.TimerRunBit:
+                        maximumAddress = 191;
+                        break;
+
+                    case OperandType.CounterCurrent:
+                    case OperandType.CounterPreset:
+                    case OperandType.CounterRunBit:
+                        maximumAddress = 23;
+                        break;
+
+                    default:
+                        throw new UnitronicsException("The '" + type + "' Operand Type is not supported by this '" + _model + "' Unitronics PLC");
+                }
+            }
+
+            if(IsEnhanced)
+            {
+                if(_model == PLCModel.V130 || _model == PLCModel.EXF_RC15)
+                {
+                    switch (type)
+                    {
+                        case OperandType.MB:
+                            maximumAddress = 4095;
+                            break;
+
+                        case OperandType.MI:
+                            maximumAddress = 2047;
+                            break;
+
+                        case OperandType.SB:
+                        case OperandType.SI:
+                            maximumAddress = 511;
+                            break;
+
+                        case OperandType.ML:
+                            maximumAddress = 255;
+                            break;
+
+                        case OperandType.SL:
+                            maximumAddress = 55;
+                            break;
+
+                        case OperandType.MF:
+                            maximumAddress = 23;
+                            break;
+
+                        case OperandType.DW:
+                        case OperandType.SDW:
+                            maximumAddress = 63;
+                            break;
+
+                        case OperandType.Input:
+                        case OperandType.Output:
+                            maximumAddress = 543;
+                            break;
+
+                        case OperandType.TimerCurrent:
+                        case OperandType.TimerPreset:
+                        case OperandType.TimerRunBit:
+                            maximumAddress = 191;
+                            break;
+
+                        case OperandType.CounterCurrent:
+                        case OperandType.CounterPreset:
+                        case OperandType.CounterRunBit:
+                            maximumAddress = 23;
+                            break;
+
+                        case OperandType.XB:
+                            maximumAddress = 1023;
+                            break;
+
+                        case OperandType.XI:
+                            maximumAddress = 511;
+                            break;
+
+                        case OperandType.XL:
+                            maximumAddress = 255;
+                            break;
+
+                        case OperandType.XDW:
+                            maximumAddress = 63;
+                            break;
+
+                        default:
+                            throw new UnitronicsException("The '" + type + "' Operand Type is not supported by this '" + _model + "' Unitronics PLC");
+                    }
+                }
+                else if (_model == PLCModel.Samba35 || _model == PLCModel.Samba43 || _model == PLCModel.Samba70)
+                {
+                    switch (type)
+                    {
+                        case OperandType.MB:
+                            maximumAddress = 511;
+                            break;
+
+                        case OperandType.MI:
+                            maximumAddress = 255;
+                            break;
+
+                        case OperandType.SB:
+                        case OperandType.SI:
+                            maximumAddress = 511;
+                            break;
+
+                        case OperandType.ML:
+                            maximumAddress = 31;
+                            break;
+
+                        case OperandType.SL:
+                            maximumAddress = 55;
+                            break;
+
+                        case OperandType.MF:
+                            maximumAddress = 23;
+                            break;
+
+                        case OperandType.DW:
+                            maximumAddress = 31;
+                            break;
+
+                        case OperandType.SDW:
+                            maximumAddress = 63;
+                            break;
+
+                        case OperandType.Input:
+                        case OperandType.Output:
+                            maximumAddress = 271;
+                            break;
+
+                        case OperandType.TimerCurrent:
+                        case OperandType.TimerPreset:
+                        case OperandType.TimerRunBit:
+                            maximumAddress = 31;
+                            break;
+
+                        case OperandType.CounterCurrent:
+                        case OperandType.CounterPreset:
+                        case OperandType.CounterRunBit:
+                            maximumAddress = 15;
+                            break;
+
+                        case OperandType.XB:
+                            maximumAddress = 63;
+                            break;
+
+                        case OperandType.XI:
+                            maximumAddress = 31;
+                            break;
+
+                        case OperandType.XL:
+                            maximumAddress = 15;
+                            break;
+
+                        case OperandType.XDW:
+                            maximumAddress = 15;
+                            break;
+
+                        default:
+                            throw new UnitronicsException("The '" + type + "' Operand Type is not supported by this '" + _model + "' Unitronics PLC");
+                    }
+                }
+                else
+                {
+                    switch (type)
+                    {
+                        case OperandType.MB:
+                            maximumAddress = 8191;
+                            break;
+
+                        case OperandType.MI:
+                            maximumAddress = 4095;
+                            break;
+
+                        case OperandType.SB:
+                        case OperandType.SI:
+                        case OperandType.ML:
+                            maximumAddress = 511;
+                            break;
+
+                        case OperandType.SL:
+                            maximumAddress = 55;
+                            break;
+
+                        case OperandType.MF:
+                        case OperandType.SDW:
+                            maximumAddress = 63;
+                            break;
+
+                        case OperandType.DW:
+                            maximumAddress = 255;
+                            break;
+
+                        case OperandType.Input:
+                        case OperandType.Output:
+                            maximumAddress = 543;
+                            break;
+
+                        case OperandType.TimerCurrent:
+                        case OperandType.TimerPreset:
+                        case OperandType.TimerRunBit:
+                            maximumAddress = 383;
+                            break;
+
+                        case OperandType.CounterCurrent:
+                        case OperandType.CounterPreset:
+                        case OperandType.CounterRunBit:
+                            maximumAddress = 31;
+                            break;
+
+                        case OperandType.XB:
+                            maximumAddress = 1023;
+                            break;
+
+                        case OperandType.XI:
+                            maximumAddress = 511;
+                            break;
+
+                        case OperandType.XL:
+                            maximumAddress = 255;
+                            break;
+
+                        case OperandType.XDW:
+                            maximumAddress = 63;
+                            break;
+
+                        default:
+                            throw new UnitronicsException("The '" + type + "' Operand Type is not supported by this '" + _model + "' Unitronics PLC");
+                    }
+                }
+            }
+
+            if(addresses.Max() > maximumAddress)
+            {
+                throw new UnitronicsException("The Address for an '" + type + "' Operand cannot be greater than '" + maximumAddress + "' for this '" + _model + "' Unitronics PLC");
+            }
         }
 
-        private bool validateWriteOperandsRequest()
+        private void validateWriteOperandRequest(OperandType type, ushort address, object value)
         {
-            throw new NotImplementedException();
+            if(value == null)
+            {
+                throw new ArgumentNullException(nameof(value));
+            }
+            
+            switch(type)
+            {
+                case OperandType.CounterRunBit:
+                case OperandType.TimerRunBit:
+                case OperandType.Input:
+                    throw new UnitronicsException("The '" + type + "' Operand Type cannot be Written to");
+
+                case OperandType.Output:
+                case OperandType.MB:
+                case OperandType.SB:
+                case OperandType.XB:
+                    if(value.GetType() != typeof(bool))
+                    {
+                        throw new UnitronicsException("Invalid Value Type '" + value.GetType() + "' for the '" + type + "' Operand Type");
+                    }
+                    break;
+
+                case OperandType.MI:
+                case OperandType.SI:
+                case OperandType.XI:
+                case OperandType.CounterCurrent:
+                case OperandType.CounterPreset:
+                    if (value.IsNumeric() == false)
+                    {
+                        throw new UnitronicsException("Invalid Value Type '" + value.GetType() + "' for the '" + type + "' Operand Type");
+                    }
+                    else if(value.TryGetValue<short>(out _) == false)
+                    {
+                        throw new UnitronicsException("The Value must be between '" + short.MinValue + "' and '" + short.MaxValue + "' for the '" + type + "' Operand Type");
+                    }
+                    break;
+
+                case OperandType.ML:
+                case OperandType.SL:
+                case OperandType.XL:
+                    if (value.IsNumeric() == false)
+                    {
+                        throw new UnitronicsException("Invalid Value Type '" + value.GetType() + "' for the '" + type + "' Operand Type");
+                    }
+                    else if (value.TryGetValue<int>(out _) == false)
+                    {
+                        throw new UnitronicsException("The Value must be between '" + int.MinValue + "' and '" + int.MaxValue + "' for the '" + type + "' Operand Type");
+                    }
+                    break;
+
+                case OperandType.DW:
+                case OperandType.SDW:
+                case OperandType.XDW:
+                    if (value.IsNumeric() == false)
+                    {
+                        throw new UnitronicsException("Invalid Value Type '" + value.GetType() + "' for the '" + type + "' Operand Type");
+                    }
+                    else if (value.TryGetValue<uint>(out _) == false)
+                    {
+                        throw new UnitronicsException("The Value must be between '" + uint.MinValue + "' and '" + uint.MaxValue + "' for the '" + type + "' Operand Type");
+                    }
+                    break;
+
+                case OperandType.MF:
+                    if (value.IsNumeric() == false)
+                    {
+                        throw new UnitronicsException("Invalid Value Type '" + value.GetType() + "' for the '" + type + "' Operand Type");
+                    }
+                    else if (value.TryGetValue<float>(out _) == false)
+                    {
+                        throw new UnitronicsException("The Value must be between '" + float.MinValue + "' and '" + float.MaxValue + "' for the '" + type + "' Operand Type");
+                    }
+                    break;
+
+                case OperandType.TimerCurrent:
+                case OperandType.TimerPreset:
+                    if(value is TimeSpan timeSpanValue)
+                    {
+                        // TODO: Validate the Maximum Value for a Timer
+                    }
+                    else if(value.IsNumeric() == false)
+                    {
+                        throw new UnitronicsException("Invalid Value Type '" + value.GetType() + "' for the '" + type + "' Operand Type");
+                    }
+                    else if(value.TryGetValue<uint>(out _) == false) // TODO: Validate the correct Maximum Value for a Timer
+                    {
+                        throw new UnitronicsException("The Value must be between '" + uint.MinValue + "' and '" + uint.MaxValue + "' for the '" + type + "' Operand Type");
+                    }
+                    break;
+            }
         }
 
         #endregion

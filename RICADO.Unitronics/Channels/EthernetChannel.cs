@@ -23,6 +23,8 @@ namespace RICADO.Unitronics.Channels
 
         private TcpClient _client;
 
+        private ushort _requestId = 0;
+
         private readonly SemaphoreSlim _semaphore;
 
         #endregion
@@ -279,9 +281,14 @@ namespace RICADO.Unitronics.Channels
                     throw new UnitronicsException("Failed to Receive " + protocol + " Message within the Timeout Period from Unitronics PLC '" + RemoteHost + ":" + Port + "'");
                 }
 
-                if (receivedData[0] != 210 || receivedData[1] != 4 || receivedData[3] != 0)
+                if (receivedData[3] != 0)
                 {
                     throw new UnitronicsException("Failed to Receive " + protocol + " Message from Unitronics PLC  '" + RemoteHost + ":" + Port + "' - The TCP Header was Invalid");
+                }
+
+                if (BitConverter.ToUInt16(receivedData.GetRange(0, 2).ToArray(), 0) != _requestId)
+                {
+                    throw new UnitronicsException("Failed to Receive " + protocol + " Message from Unitronics PLC '" + RemoteHost + ":" + Port + "' - The TCP Header Transaction ID did not Match");
                 }
 
                 if (receivedData[2] != (byte)protocol)
@@ -291,7 +298,7 @@ namespace RICADO.Unitronics.Channels
 
                 int tcpMessageDataLength = BitConverter.ToUInt16(new byte[] { receivedData[4], receivedData[5] });
 
-                if (tcpMessageDataLength <= 0 || tcpMessageDataLength > 1003)
+                if (tcpMessageDataLength <= 0 || tcpMessageDataLength > 1009)
                 {
                     throw new UnitronicsException("Failed to Receive " + protocol + " Message from Unitronics PLC  '" + RemoteHost + ":" + Port + "' - The TCP Message Length was Invalid");
                 }
@@ -354,9 +361,8 @@ namespace RICADO.Unitronics.Channels
         {
             List<byte> tcpMessage = new List<byte>();
 
-            // Fixed Bytes
-            tcpMessage.Add(210);
-            tcpMessage.Add(4);
+            // Transaction Identifier
+            tcpMessage.AddRange(BitConverter.GetBytes(getNextRequestId()));
 
             // Protocol Identifier
             tcpMessage.Add((byte)protocol);
@@ -365,19 +371,26 @@ namespace RICADO.Unitronics.Channels
             tcpMessage.Add(0);
 
             // Command Length
-            tcpMessage.AddRange(BitConverter.GetBytes(Convert.ToUInt16(message.Length)).Reverse()); // TODO: Confirm this should be reversed!!
-
-            // TODO: Test the reversing is correct using the below
-
-            int commandLength = message.Length;
-            byte lsb = Convert.ToByte(commandLength & 0x00FF);
-            byte msb = Convert.ToByte((commandLength & 0xFF00) >> 8);
-
+            tcpMessage.AddRange(BitConverter.GetBytes(Convert.ToUInt16(message.Length)).Reverse());
 
             // Add Command Message
             tcpMessage.AddRange(message.ToArray());
 
             return tcpMessage.ToArray();
+        }
+
+        private ushort getNextRequestId()
+        {
+            if (_requestId == ushort.MaxValue)
+            {
+                _requestId = ushort.MinValue;
+            }
+            else
+            {
+                _requestId++;
+            }
+
+            return _requestId;
         }
 
         #endregion

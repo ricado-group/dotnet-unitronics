@@ -23,8 +23,6 @@ namespace RICADO.Unitronics
         MF,
         Input,
         Output,
-        InputForce,
-        OutputForce,
         TimerRunBit,
         CounterRunBit,
         DW,
@@ -76,48 +74,5 @@ namespace RICADO.Unitronics
     {
         PComA = 101,
         PComB = 102,
-    }
-
-    public enum enOperandsExecuterType
-    {
-        None = 0,
-        ASCII = 1,
-        PartialBinary = 2,
-        FullBinary = 3
-    }
-
-    public enum enPLCMode
-    {
-        Unknown,
-        OS,
-        BOOT,
-        PreBOOT
-    }
-
-    public enum enBinaryCommand
-    {
-        ReadDataTables = 4,
-        ReadFlashStatus = 7,
-        ReadPLCName = 12,
-        AccessSD = 42,
-        ReadPartOfProjectDataTables = 75,
-        WriteDataTables = 68,
-        ReadOperands = 77,
-        ReadWrite = 80
-    }
-
-    public enum enCOMPort
-    {
-        One = 1,
-        Two = 2,
-        Three = 3,
-        CANBus = 'C'
-    }
-
-    internal enum enMessageDirection
-    {
-        Sent,
-        Received,
-        Unspecified
     }
 }

@@ -45,7 +45,7 @@ namespace RICADO.Unitronics.Protocols
         #endregion
 
 
-        #region Public Methods
+        #region Public Properties
 
         public static readonly byte[] STXResponse = Encoding.ASCII.GetBytes("/A");
 
@@ -71,16 +71,6 @@ namespace RICADO.Unitronics.Protocols
             {
                 ReadCode = "RA",
                 WriteCode = "SA",
-            });
-
-            _operandCommandCodes.Add(OperandType.InputForce, new OperandCommandCode
-            {
-                WriteCode = "SD",
-            });
-
-            _operandCommandCodes.Add(OperandType.OutputForce, new OperandCommandCode
-            {
-                WriteCode = "SE",
             });
 
             _operandCommandCodes.Add(OperandType.MB, new OperandCommandCode
@@ -305,6 +295,174 @@ namespace RICADO.Unitronics.Protocols
             extractReceivedMessageData(unitId, Commands.WriteClock, message);
         }
 
+        public static ReadOnlyMemory<byte> BuildWriteOperandMessage(byte unitId, OperandType type, ushort address, object value)
+        {
+            StringBuilder messageBuilder = createMessageBuilder(unitId, _operandCommandCodes[type].WriteCode);
+
+            // Start Address
+            messageBuilder.AppendHexValue(address);
+
+            // Operand Count
+            messageBuilder.AppendHexValue((byte)1);
+
+            switch(type)
+            {
+                case OperandType.Output:
+                case OperandType.MB:
+                case OperandType.SB:
+                case OperandType.XB:
+                    if(value.TryGetValue(out bool boolValue))
+                    {
+                        messageBuilder.AppendHexValue(boolValue == true ? 1 : 0, 1);
+                    }
+                    else
+                    {
+                        messageBuilder.AppendHexValue(0, 1);
+                    }
+                    break;
+
+                case OperandType.MI:
+                case OperandType.SI:
+                case OperandType.XI:
+                case OperandType.CounterCurrent:
+                case OperandType.CounterPreset:
+                    if (value.TryGetValue(out short shortValue))
+                    {
+                        messageBuilder.AppendHexValue(shortValue);
+                    }
+                    else
+                    {
+                        messageBuilder.AppendHexValue((short)0);
+                    }
+                    break;
+
+                case OperandType.ML:
+                case OperandType.SL:
+                case OperandType.XL:
+                    if (value.TryGetValue(out int intValue))
+                    {
+                        messageBuilder.AppendHexValue(intValue);
+                    }
+                    else
+                    {
+                        messageBuilder.AppendHexValue((int)0);
+                    }
+                    break;
+
+                case OperandType.DW:
+                case OperandType.SDW:
+                case OperandType.XDW:
+                    if (value.TryGetValue(out int uintValue))
+                    {
+                        messageBuilder.AppendHexValue(uintValue);
+                    }
+                    else
+                    {
+                        messageBuilder.AppendHexValue((uint)0);
+                    }
+                    break;
+
+                case OperandType.MF:
+                    if(value.TryGetValue(out float floatValue))
+                    {
+                        messageBuilder.AppendHexValue(floatValue);
+                    }
+                    else
+                    {
+                        messageBuilder.AppendHexValue((float)0);
+                    }
+                    break;
+
+                case OperandType.TimerCurrent:
+                case OperandType.TimerPreset:
+                    uint timerValue = 0;
+
+                    if (value is TimeSpan timeSpanValue)
+                    {
+                        timerValue = Convert.ToUInt32(timeSpanValue.TotalMilliseconds);
+                    }
+                    else if (value.TryGetValue(out uint uintTimerValue))
+                    {
+                        timerValue = uintTimerValue;
+                    }
+
+                    if(timerValue > 359999990)
+                    {
+                        timerValue = 359999990; // Maximum Timer Value - 99 Hours, 59 Minutes, 59 Seconds, 990 Milliseconds
+                    }
+                    
+                    if (timerValue > 0)
+                    {
+                        timerValue /= 10;
+                    }
+
+                    messageBuilder.AppendHexValue(timerValue);
+                    break;
+            }
+
+            return finalizeMessageBuilder(messageBuilder);
+        }
+
+        public static void ValidateWriteOperandMessage(byte unitId, OperandType type, Memory<byte> message)
+        {
+            extractReceivedMessageData(unitId, _operandCommandCodes[type].WriteCode, message);
+        }
+
+        public static HashSet<ReadOperandsMessage> BuildReadOperandsMessages(byte unitId, Dictionary<OperandType, HashSet<ushort>> operandAddresses, ushort bufferSize)
+        {
+            HashSet<ReadOperandsMessage> messages = new HashSet<ReadOperandsMessage>();
+            
+            foreach(OperandType operand in operandAddresses.Keys)
+            {
+                int operandLength = calculateOperandMessageLength(operand);
+                int maximumReceiveLength = bufferSize - STXResponse.Length - UnitIDLength - CommandLength - 1;
+                
+                ReadOperandsMessage readMessage = null;
+
+                foreach(ushort address in operandAddresses[operand].OrderBy(address => address))
+                {
+                    if(readMessage != null)
+                    {
+                        int newLength = address - readMessage.StartAddress + 1;
+                        
+                        if(newLength * operandLength > maximumReceiveLength || newLength > MaximumOperandsLength)
+                        {
+                            messages.Add(readMessage);
+
+                            readMessage = new ReadOperandsMessage
+                            {
+                                UnitID = unitId,
+                                Type = operand,
+                                StartAddress = address,
+                                Length = 1,
+                            };
+                        }
+                        else
+                        {
+                            readMessage.Length = (byte)newLength;
+                        }
+                    }
+                    else
+                    {
+                        readMessage = new ReadOperandsMessage
+                        {
+                            UnitID = unitId,
+                            Type = operand,
+                            StartAddress = address,
+                            Length = 1,
+                        };
+                    }
+                }
+
+                if(readMessage != null && readMessage.Length > 0)
+                {
+                    messages.Add(readMessage);
+                }
+            }
+
+            return messages;
+        }
+
         #endregion
 
 
@@ -379,6 +537,41 @@ namespace RICADO.Unitronics.Protocols
             return messageString;
         }
 
+        private static int calculateOperandMessageLength(OperandType type)
+        {
+            switch(type)
+            {
+                case OperandType.Input:
+                case OperandType.Output:
+                case OperandType.MB:
+                case OperandType.SB:
+                case OperandType.XB:
+                case OperandType.CounterRunBit:
+                case OperandType.TimerRunBit:
+                    return 1;
+
+                case OperandType.MI:
+                case OperandType.SI:
+                case OperandType.XI:
+                case OperandType.CounterCurrent:
+                case OperandType.CounterPreset:
+                    return 4;
+
+                case OperandType.ML:
+                case OperandType.SL:
+                case OperandType.XL:
+                case OperandType.DW:
+                case OperandType.SDW:
+                case OperandType.XDW:
+                case OperandType.MF:
+                case OperandType.TimerCurrent:
+                case OperandType.TimerPreset:
+                    return 8;
+            }
+
+            return 1;
+        }
+
         #endregion
 
 
@@ -388,6 +581,132 @@ namespace RICADO.Unitronics.Protocols
         {
             public string ReadCode;
             public string WriteCode;
+        }
+
+        #endregion
+
+
+        #region Classes
+
+        public class ReadOperandsMessage
+        {
+            public byte UnitID;
+            public OperandType Type;
+            public ushort StartAddress;
+            public byte Length;
+
+            public ReadOnlyMemory<byte> BuildRequestMessage()
+            {
+                StringBuilder messageBuilder = createMessageBuilder(UnitID, _operandCommandCodes[Type].ReadCode);
+
+                messageBuilder.AppendHexValue(StartAddress);
+
+                messageBuilder.AppendHexValue(Length);
+
+                return finalizeMessageBuilder(messageBuilder);
+            }
+
+            public object[] UnpackResponseMessage(Memory<byte> message)
+            {
+                string messageString = extractReceivedMessageData(UnitID, _operandCommandCodes[Type].ReadCode, message);
+
+                int operandLength = calculateOperandMessageLength(Type);
+
+                int expectedLength = Length * operandLength;
+
+                if (messageString.Length < expectedLength)
+                {
+                    throw new PComAException("The Response Data Length of '" + messageString.Length + "' was too short - Expecting a Length of '" + expectedLength + "'");
+                }
+
+                object[] values = new object[Length];
+
+                for(int i = 0; i < Length; i++)
+                {
+                    string valueString = messageString.Substring(0, operandLength);
+
+                    switch(Type)
+                    {
+                        case OperandType.Input:
+                        case OperandType.Output:
+                        case OperandType.MB:
+                        case OperandType.SB:
+                        case OperandType.XB:
+                            if(byte.TryParse(valueString, NumberStyles.HexNumber, CultureInfo.InvariantCulture.NumberFormat, out byte bitValue) == false)
+                            {
+                                throw new PComAException("Failed to Extract Values from the Response Data for the Operand Type '" + Type + "'");
+                            }
+
+                            values[i] = bitValue > 0 ? true : false;
+                            break;
+
+                        case OperandType.MI:
+                        case OperandType.SI:
+                        case OperandType.XI:
+                        case OperandType.CounterCurrent:
+                        case OperandType.CounterPreset:
+                            if(short.TryParse(valueString, NumberStyles.HexNumber, CultureInfo.InvariantCulture.NumberFormat, out short shortValue) == false)
+                            {
+                                throw new PComAException("Failed to Extract Values from the Response Data for the Operand Type '" + Type + "'");
+                            }
+
+                            values[i] = shortValue;
+                            break;
+
+                        case OperandType.ML:
+                        case OperandType.SL:
+                        case OperandType.XL:
+                            if (int.TryParse(valueString, NumberStyles.HexNumber, CultureInfo.InvariantCulture.NumberFormat, out int intValue) == false)
+                            {
+                                throw new PComAException("Failed to Extract Values from the Response Data for the Operand Type '" + Type + "'");
+                            }
+
+                            values[i] = intValue;
+                            break;
+
+                        case OperandType.DW:
+                        case OperandType.SDW:
+                        case OperandType.XDW:
+                            if (uint.TryParse(valueString, NumberStyles.HexNumber, CultureInfo.InvariantCulture.NumberFormat, out uint uintValue) == false)
+                            {
+                                throw new PComAException("Failed to Extract Values from the Response Data for the Operand Type '" + Type + "'");
+                            }
+
+                            values[i] = uintValue;
+                            break;
+
+                        case OperandType.MF:
+                            if(valueString.Length != 8)
+                            {
+                                throw new PComAException("Failed to Extract Values from the Response Data for the Operand Type '" + Type + "'");
+                            }
+
+                            byte[] hexBytes = new byte[4];
+
+                            hexBytes[1] = byte.Parse(valueString.Substring(0, 2), NumberStyles.HexNumber);
+                            hexBytes[0] = byte.Parse(valueString.Substring(2, 2), NumberStyles.HexNumber);
+                            hexBytes[3] = byte.Parse(valueString.Substring(4, 2), NumberStyles.HexNumber);
+                            hexBytes[2] = byte.Parse(valueString.Substring(6, 2), NumberStyles.HexNumber);
+
+                            values[i] = BitConverter.ToSingle(hexBytes);
+                            break;
+
+                        case OperandType.TimerCurrent:
+                        case OperandType.TimerPreset:
+                            if (uint.TryParse(valueString, NumberStyles.HexNumber, CultureInfo.InvariantCulture.NumberFormat, out uint timerValue) == false)
+                            {
+                                throw new PComAException("Failed to Extract Values from the Response Data for the Operand Type '" + Type + "'");
+                            }
+
+                            values[i] = timerValue * 10;
+                            break;
+                    }
+
+                    messageString = messageString.Remove(0, operandLength);
+                }
+
+                return values;
+            }
         }
 
         #endregion

@@ -1,6 +1,6 @@
 ﻿namespace RICADO.Unitronics
 {
-    public struct WriteOperandsResult
+    public struct WriteOperandResult
     {
         public int BytesSent;
         public int PacketsSent;
