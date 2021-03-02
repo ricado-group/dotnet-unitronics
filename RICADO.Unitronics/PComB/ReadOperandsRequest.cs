@@ -40,9 +40,9 @@ namespace RICADO.Unitronics.PComB
 
         #region Public Methods
 
-        public ReadOperandsResponse UnpackResponseMessage(Memory<byte> responseMessage)
+        public ReadOperandsResponse UnpackResponseMessage(Memory<byte> responseMessage, bool disableChecksum = false)
         {
-            return ReadOperandsResponse.UnpackResponseMessage(this, responseMessage);
+            return ReadOperandsResponse.UnpackResponseMessage(this, responseMessage, disableChecksum);
         }
 
         /*public static ReadOperandsRequest CreateNew(UnitronicsPLC plc, OperandType type, ushort startAddress, byte length)
@@ -139,13 +139,27 @@ namespace RICADO.Unitronics.PComB
             {
                 if (_operandRequests.ContainsKey(type) == false)
                 {
-                    _operandRequests.Add(type, new VectorialOperandRequest(type, address, 1));
+                    //_operandRequests.Add(type, new VectorialOperandRequest(type, address, 1));
+                    _operandRequests.Add(type, new VectorialOperandRequest(type, address, 8));
                     return;
                 }
 
-                if (_operandRequests.TryGetValue(type, out IOperandRequest genericRequest) && genericRequest is VectorialOperandRequest request && address >= request.StartAddress && request.Count < address - request.StartAddress + 1)
+                /*if (_operandRequests.TryGetValue(type, out IOperandRequest genericRequest) && genericRequest is VectorialOperandRequest request && address >= request.StartAddress && request.Count < address - request.StartAddress + 1)
                 {
                     request.Count = (ushort)(address - request.StartAddress + 1);
+                }*/
+
+                if (_operandRequests.TryGetValue(type, out IOperandRequest genericRequest) && genericRequest is VectorialOperandRequest request)
+                {
+                    if (address >= request.StartAddress && request.Count < address - request.StartAddress + 1)
+                    {
+                        request.Count = (ushort)(address - request.StartAddress + 1);
+                    }
+
+                    if(request.Count % 8 != 0)
+                    {
+                        request.Count = (ushort)(request.Count + (request.Count % 8));
+                    }
                 }
             }
             else

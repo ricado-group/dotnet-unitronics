@@ -300,11 +300,11 @@ namespace RICADO.Unitronics
                 //
                 // NOTE: This mixed Reading Command is actually super inefficient! So we won't support it
             }
-            else if(IsEnhanced || IsStandard)
+            else if(IsEnhanced) // NOTE: Seems Standard PLCs break when using this method of communication!!!?
             {
                 foreach (PComB.ReadOperandsRequest request in PComB.ReadOperandsRequest.CreateMultiple(this, readRequest.OperandAddresses))
                 {
-                    ProcessMessageResult messageResult = await _channel.ProcessMessageAsync(request.BuildMessage(), ProtocolType.PComA, _unitId, _timeout, _retries, cancellationToken);
+                    ProcessMessageResult messageResult = await _channel.ProcessMessageAsync(request.BuildMessage(), ProtocolType.PComB, _unitId, _timeout, _retries, cancellationToken);
 
                     PComB.ReadOperandsResponse response = request.UnpackResponseMessage(messageResult.ResponseMessage);
 
@@ -394,9 +394,9 @@ namespace RICADO.Unitronics
             {
                 PComB.WriteOperandRequest request = PComB.WriteOperandRequest.CreateNew(this, type, address, value);
 
-                result = await _channel.ProcessMessageAsync(request.BuildMessage(), ProtocolType.PComA, _unitId, _timeout, _retries, cancellationToken);
+                result = await _channel.ProcessMessageAsync(request.BuildMessage(), ProtocolType.PComB, _unitId, _timeout, _retries, cancellationToken);
 
-                request.ValidateResponseMessage(result.ResponseMessage);
+                request.ValidateResponseMessage(result.ResponseMessage, IsStandard);
             }
             else
             {

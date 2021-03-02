@@ -42,7 +42,7 @@ namespace RICADO.Unitronics.PComB
 
         #region Constructor
 
-        protected Response(Request request, Memory<byte> responseMessage)
+        protected Response(Request request, Memory<byte> responseMessage, bool disableChecksum = false)
         {
             _request = request;
 
@@ -63,7 +63,7 @@ namespace RICADO.Unitronics.PComB
 
             ushort headerChecksum = BitConverter.ToUInt16(responseMessage.Slice(HeaderLength - ChecksumLength, ChecksumLength).Span);
 
-            if (headerChecksum != responseMessage.Slice(0, HeaderLength - ChecksumLength).ToArray().CalculateChecksum())
+            if (disableChecksum == false && headerChecksum != responseMessage.Slice(0, HeaderLength - ChecksumLength).ToArray().CalculateChecksum())
             {
                 throw new PComBException("Header Checksum Verification Failure");
             }
@@ -101,7 +101,7 @@ namespace RICADO.Unitronics.PComB
 
             ushort dataChecksum = BitConverter.ToUInt16(responseMessage.Slice(messageDataLength, ChecksumLength).Span);
 
-            if (dataChecksum != responseMessage.Slice(0, messageDataLength).ToArray().CalculateChecksum())
+            if (disableChecksum == false && dataChecksum != responseMessage.Slice(0, messageDataLength).ToArray().CalculateChecksum())
             {
                 throw new PComBException("Message Data Checksum Verification Failure");
             }

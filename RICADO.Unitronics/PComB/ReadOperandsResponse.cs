@@ -32,7 +32,7 @@ namespace RICADO.Unitronics.PComB
 
         #region Constructor
 
-        protected ReadOperandsResponse(Request request, Memory<byte> responseMessage) : base(request, responseMessage)
+        protected ReadOperandsResponse(Request request, Memory<byte> responseMessage, bool disableChecksum = false) : base(request, responseMessage, disableChecksum)
         {
         }
 
@@ -41,9 +41,9 @@ namespace RICADO.Unitronics.PComB
 
         #region Public Methods
 
-        public static ReadOperandsResponse UnpackResponseMessage(ReadOperandsRequest request, Memory<byte> responseMessage)
+        public static ReadOperandsResponse UnpackResponseMessage(ReadOperandsRequest request, Memory<byte> responseMessage, bool disableChecksum = false)
         {
-            return new ReadOperandsResponse(request, responseMessage);
+            return new ReadOperandsResponse(request, responseMessage, disableChecksum);
         }
 
         #endregion
@@ -77,34 +77,69 @@ namespace RICADO.Unitronics.PComB
                             case OperandType.XI:
                             case OperandType.CounterCurrent:
                             case OperandType.CounterPreset:
-                                _operandAddressValues[request.Type].TryAdd(address, BitConverter.ToInt16(messageData.Slice(index, operandByteLength).Span));
+                                try
+                                {
+                                    _operandAddressValues[request.Type].TryAdd(address, BitConverter.ToInt16(messageData.Slice(index, operandByteLength).Span));
+                                }
+                                catch (Exception e)
+                                {
+                                    throw new PComAException("Failed to Unpack Value for Operand Type '" + request.Type + "'", e);
+                                }
                                 break;
 
                             case OperandType.ML:
                             case OperandType.SL:
                             case OperandType.XL:
-                                _operandAddressValues[request.Type].TryAdd(address, BitConverter.ToInt32(messageData.Slice(index, operandByteLength).Span));
+                                try
+                                {
+                                    _operandAddressValues[request.Type].TryAdd(address, BitConverter.ToInt32(messageData.Slice(index, operandByteLength).Span));
+                                }
+                                catch (Exception e)
+                                {
+                                    throw new PComAException("Failed to Unpack Value for Operand Type '" + request.Type + "'", e);
+                                }
                                 break;
 
                             case OperandType.DW:
                             case OperandType.SDW:
                             case OperandType.XDW:
-                                _operandAddressValues[request.Type].TryAdd(address, BitConverter.ToUInt32(messageData.Slice(index, operandByteLength).Span));
+                                try
+                                {
+                                    _operandAddressValues[request.Type].TryAdd(address, BitConverter.ToUInt32(messageData.Slice(index, operandByteLength).Span));
+                                }
+                                catch (Exception e)
+                                {
+                                    throw new PComAException("Failed to Unpack Value for Operand Type '" + request.Type + "'", e);
+                                }
                                 break;
 
                             case OperandType.MF:
-                                byte[] floatBytes = messageData.Slice(index, operandByteLength).ToArray();
+                                try
+                                {
+                                    byte[] floatBytes = messageData.Slice(index, operandByteLength).ToArray();
 
-                                Array.Reverse(floatBytes);
-                                Array.Reverse(floatBytes, 0, 2);
-                                Array.Reverse(floatBytes, 2, 2);
+                                    Array.Reverse(floatBytes);
+                                    Array.Reverse(floatBytes, 0, 2);
+                                    Array.Reverse(floatBytes, 2, 2);
 
-                                _operandAddressValues[request.Type].TryAdd(address, BitConverter.ToSingle(floatBytes));
+                                    _operandAddressValues[request.Type].TryAdd(address, BitConverter.ToSingle(floatBytes));
+                                }
+                                catch (Exception e)
+                                {
+                                    throw new PComAException("Failed to Unpack Value for Operand Type '" + request.Type + "'", e);
+                                }
                                 break;
 
                             case OperandType.TimerCurrent:
                             case OperandType.TimerPreset:
-                                _operandAddressValues[request.Type].TryAdd(address, BitConverter.ToUInt32(messageData.Slice(index, operandByteLength).Span) * 10);
+                                try
+                                {
+                                    _operandAddressValues[request.Type].TryAdd(address, BitConverter.ToUInt32(messageData.Slice(index, operandByteLength).Span) * 10);
+                                }
+                                catch (Exception e)
+                                {
+                                    throw new PComAException("Failed to Unpack Value for Operand Type '" + request.Type + "'", e);
+                                }
                                 break;
                         }
 
@@ -113,27 +148,34 @@ namespace RICADO.Unitronics.PComB
                 }
                 else if(request is ReadOperandsRequest.VectorialOperandRequest vectorialRequest)
                 {
-                    int byteCount = vectorialRequest.Count / 8;
-
-                    if(vectorialRequest.Count % 8 != 0)
+                    try
                     {
-                        byteCount += 1;
+                        int byteCount = vectorialRequest.Count / 8;
+
+                        if (vectorialRequest.Count % 8 != 0)
+                        {
+                            byteCount += 1;
+                        }
+
+                        BitArray bitArray = new BitArray(messageData.Slice(index, byteCount).ToArray());
+
+                        ushort address = vectorialRequest.StartAddress;
+                        int bitIndex = 0;
+
+                        while (address < vectorialRequest.StartAddress + vectorialRequest.Count && bitIndex < bitArray.Count)
+                        {
+                            _operandAddressValues[request.Type].TryAdd(address, bitArray[bitIndex]);
+
+                            bitIndex++;
+                            address++;
+                        }
+
+                        index += byteCount;
                     }
-
-                    BitArray bitArray = new BitArray(messageData.Slice(index, byteCount).ToArray());
-
-                    ushort address = vectorialRequest.StartAddress;
-                    int bitIndex = 0;
-
-                    while(address < vectorialRequest.StartAddress + vectorialRequest.Count && bitIndex < bitArray.Count)
+                    catch (Exception e)
                     {
-                        _operandAddressValues[request.Type].TryAdd(address, bitArray[bitIndex]);
-
-                        bitIndex++;
-                        address++;
+                        throw new PComAException("Failed to Unpack Value for Operand Type '" + request.Type + "'", e);
                     }
-
-                    index += byteCount;
                 }
             }
         }

@@ -8,7 +8,7 @@ namespace RICADO.Unitronics.PComA
     {
         #region Private Fields
 
-        private List<object> _values;
+        private List<object> _values = new List<object>();
 
         #endregion
 
@@ -31,7 +31,7 @@ namespace RICADO.Unitronics.PComA
 
         protected ReadOperandsResponse(Request request, Memory<byte> responseMessage) : base(request, responseMessage)
         {
-            _values = new List<object>((request as ReadOperandsRequest).Length);
+            //_values = new List<object>((request as ReadOperandsRequest).Length);
         }
 
         #endregion

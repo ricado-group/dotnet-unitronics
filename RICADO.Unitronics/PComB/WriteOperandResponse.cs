@@ -7,7 +7,7 @@ namespace RICADO.Unitronics.PComB
     {
         #region Constructor
 
-        protected WriteOperandResponse(Request request, Memory<byte> responseMessage) : base(request, responseMessage)
+        protected WriteOperandResponse(Request request, Memory<byte> responseMessage, bool disableChecksum = false) : base(request, responseMessage, disableChecksum)
         {
         }
 
@@ -16,9 +16,9 @@ namespace RICADO.Unitronics.PComB
 
         #region Public Methods
 
-        public static void ValidateResponseMessage(WriteOperandRequest request, Memory<byte> responseMessage)
+        public static void ValidateResponseMessage(WriteOperandRequest request, Memory<byte> responseMessage, bool disableChecksum = false)
         {
-            _ = new WriteOperandResponse(request, responseMessage);
+            _ = new WriteOperandResponse(request, responseMessage, disableChecksum);
         }
 
         #endregion

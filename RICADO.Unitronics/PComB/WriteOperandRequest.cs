@@ -38,9 +38,9 @@ namespace RICADO.Unitronics.PComB
 
         #region Public Methods
 
-        public void ValidateResponseMessage(Memory<byte> responseMessage)
+        public void ValidateResponseMessage(Memory<byte> responseMessage, bool disableChecksum = false)
         {
-            WriteOperandResponse.ValidateResponseMessage(this, responseMessage);
+            WriteOperandResponse.ValidateResponseMessage(this, responseMessage, disableChecksum);
         }
 
         public static WriteOperandRequest CreateNew(UnitronicsPLC plc, OperandType type, ushort address, object value)
