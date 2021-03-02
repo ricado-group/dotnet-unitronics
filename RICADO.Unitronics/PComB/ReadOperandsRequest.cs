@@ -85,6 +85,13 @@ namespace RICADO.Unitronics.PComB
 
                     request.addOperandAddress(operand, address);
                 }
+
+                if (request != null && request.OperandRequests.Count > 0 && request.OperandRequests.Values.Any(request => request.Count > 0))
+                {
+                    requests.Add(request);
+
+                    request = null;
+                }
             }
 
             if (request != null && request.OperandRequests.Count > 0 && request.OperandRequests.Values.Any(request => request.Count > 0))
