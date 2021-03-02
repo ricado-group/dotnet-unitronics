@@ -12,29 +12,34 @@ namespace RICADO.Unitronics
         SerialOverLAN,
     }
 
-    public enum OperandType
+    public enum OperandType : ushort
     {
-        MB,
-        SB,
-        MI,
-        SI,
-        ML,
-        SL,
-        MF,
-        Input,
-        Output,
-        TimerRunBit,
-        CounterRunBit,
-        DW,
-        SDW,
-        CounterCurrent,
-        CounterPreset,
-        TimerCurrent,
-        TimerPreset,
-        XB,
-        XI,
-        XDW,
-        XL
+        // Bits
+        MB = 10,
+        SB = 11,
+        XB = 12,
+        Input = 13,
+        Output = 14,
+        TimerRunBit = 15,
+        CounterRunBit = 16,
+
+        // Integers
+        MI = 20,
+        SI = 21,
+        XI = 22,
+        CounterCurrent = 23,
+        CounterPreset = 24,
+
+        // Longs, Words and Floats
+        ML = 40,
+        SL = 41,
+        XL = 42,
+        DW = 43,
+        SDW = 44,
+        XDW = 45,
+        TimerCurrent = 46,
+        TimerPreset = 47,
+        MF = 48,
     }
 
     public enum PLCModel

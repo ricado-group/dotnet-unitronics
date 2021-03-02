@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace RICADO.Unitronics.Protocols
+namespace RICADO.Unitronics
 {
     public class PComAException : Exception
     {

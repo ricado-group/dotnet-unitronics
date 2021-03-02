@@ -2,13 +2,29 @@
 
 namespace RICADO.Unitronics
 {
-    public struct ReadClockResult
+    public class ReadClockResult : RequestResult
     {
-        public int BytesSent;
-        public int PacketsSent;
-        public int BytesReceived;
-        public int PacketsReceived;
-        public double Duration;
-        public DateTime Clock;
+        #region Private Fields
+
+        private DateTime _clock;
+
+        #endregion
+
+
+        #region Public Properties
+
+        public DateTime Clock => _clock;
+
+        #endregion
+
+
+        #region Constructors
+
+        internal ReadClockResult(Channels.ProcessMessageResult result, DateTime clock) : base(result)
+        {
+            _clock = clock;
+        }
+
+        #endregion
     }
 }

@@ -4,10 +4,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace RICADO.Unitronics.Responses
+namespace RICADO.Unitronics.PComA
 {
-    public abstract class Response
+    class Enums
     {
-
     }
 }

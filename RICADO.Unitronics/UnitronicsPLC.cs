@@ -1,19 +1,21 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using RICADO.Unitronics.Requests;
-using RICADO.Unitronics.Responses;
 using RICADO.Unitronics.Channels;
-using RICADO.Unitronics.Protocols;
 
 namespace RICADO.Unitronics
 {
     public class UnitronicsPLC : IDisposable
     {
+        #region Constants
+
+        internal const uint MaximumTimerValue = 359999990; // Maximum Timer Value - 99 Hours, 59 Minutes, 59 Seconds, 990 Milliseconds
+
+        #endregion
+
+
         #region Private Fields
 
         private readonly byte _unitId;
@@ -269,9 +271,7 @@ namespace RICADO.Unitronics
             }
         }
 
-        public ReadOperandsRequest CreateReadOperandsRequest() => new ReadOperandsRequest(this);
-
-        public async Task<ReadOperandsResult> ReadOperandsAsync(ReadOperandsRequest request, CancellationToken cancellationToken)
+        public async Task<ReadOperandsResult> ReadOperandsAsync(ReadOperandsRequest readRequest, CancellationToken cancellationToken)
         {
             lock (_isInitializedLock)
             {
@@ -281,12 +281,12 @@ namespace RICADO.Unitronics
                 }
             }
 
-            if (request == null)
+            if (readRequest == null)
             {
-                throw new ArgumentNullException(nameof(request));
+                throw new ArgumentNullException(nameof(readRequest));
             }
 
-            foreach (KeyValuePair<OperandType, HashSet<ushort>> operandAddresses in request.OperandAddresses)
+            foreach (KeyValuePair<OperandType, HashSet<ushort>> operandAddresses in readRequest.OperandAddresses)
             {
                 validateOperandsRequest(operandAddresses.Key, operandAddresses.Value);
             }
@@ -296,23 +296,74 @@ namespace RICADO.Unitronics
             //if((IsEnhanced && Version.Major >= 3) || (IsStandard && Version.Major >= 5 && Version.Minor >= 3))
             if(false)
             {
-                // PComB
+                // PComB Read/Write Operands Command for Reading
+                //
+                // NOTE: This mixed Reading Command is actually super inefficient! So we won't support it
             }
-            else
+            else if(IsEnhanced || IsStandard)
             {
-                foreach(PComA.ReadOperandsMessage message in PComA.BuildReadOperandsMessages(_unitId, request.OperandAddresses, BufferSize))
+                foreach (PComB.ReadOperandsRequest request in PComB.ReadOperandsRequest.CreateMultiple(this, readRequest.OperandAddresses))
                 {
-                    ProcessMessageResult messageResult = await _channel.ProcessMessageAsync(message.BuildRequestMessage(), ProtocolType.PComA, _unitId, _timeout, _retries, cancellationToken);
+                    ProcessMessageResult messageResult = await _channel.ProcessMessageAsync(request.BuildMessage(), ProtocolType.PComA, _unitId, _timeout, _retries, cancellationToken);
+
+                    PComB.ReadOperandsResponse response = request.UnpackResponseMessage(messageResult.ResponseMessage);
 
                     result.AddMessageResult(messageResult);
 
-                    object[] operandValues = message.UnpackResponseMessage(messageResult.ResponseMessage);
+                    result.AddValueRange(response.OperandAddressValues);
+                }
+            }
+            else
+            {
+                foreach(PComA.ReadOperandsRequest request in PComA.ReadOperandsRequest.CreateMultiple(this, readRequest.OperandAddresses))
+                {
+                    ProcessMessageResult messageResult = await _channel.ProcessMessageAsync(request.BuildMessage(), ProtocolType.PComA, _unitId, _timeout, _retries, cancellationToken);
 
-                    for(int i = 0; i < operandValues.Length; i++)
+                    PComA.ReadOperandsResponse response = request.UnpackResponseMessage(messageResult.ResponseMessage);
+
+                    result.AddMessageResult(messageResult);
+
+                    ushort address = request.StartAddress;
+
+                    foreach(object value in response.Values)
                     {
-                        result.AddValue(message.Type, (ushort)(message.StartAddress + i), operandValues[i]);
+                        result.AddValue(request.Type, address, value);
+
+                        address++;
                     }
                 }
+            }
+
+            return result;
+        }
+
+        public async Task<ReadOperandResult> ReadOperandAsync(OperandType type, ushort address, CancellationToken cancellationToken)
+        {
+            lock (_isInitializedLock)
+            {
+                if (_isInitialized == false)
+                {
+                    throw new UnitronicsException("This Unitronics PLC must be Initialized first before any Requests can be Processed");
+                }
+            }
+
+            validateOperandsRequest(type, new ushort[] { address });
+
+            ReadOperandResult result;
+
+            if ((IsEnhanced && Version.Major >= 3) || (IsStandard && Version.Major >= 5 && Version.Minor >= 3))
+            {
+                throw new NotImplementedException();
+            }
+            else
+            {
+                PComA.ReadOperandsRequest request = PComA.ReadOperandsRequest.CreateNew(this, type, address, 1);
+
+                ProcessMessageResult messageResult = await _channel.ProcessMessageAsync(request.BuildMessage(), ProtocolType.PComA, _unitId, _timeout, _retries, cancellationToken);
+
+                PComA.ReadOperandsResponse response = request.UnpackResponseMessage(messageResult.ResponseMessage);
+
+                result = new ReadOperandResult(messageResult, response.Values[0]);
             }
 
             return result;
@@ -337,39 +388,26 @@ namespace RICADO.Unitronics
 
             validateWriteOperandRequest(type, address, value);
 
-            ReadOnlyMemory<byte> requestMessage;
-            ProtocolType protocolType;
+            ProcessMessageResult result;
 
-            if((IsEnhanced && Version.Major >= 3) || (IsStandard && Version.Major >= 5 && Version.Minor >= 3))
+            if ((IsEnhanced && Version.Major >= 3) || (IsStandard && Version.Major >= 5 && Version.Minor >= 3))
             {
-                requestMessage = PComB.BuildWriteOperandMessage(_unitId, type, address, value);
-                protocolType = ProtocolType.PComB;
+                PComB.WriteOperandRequest request = PComB.WriteOperandRequest.CreateNew(this, type, address, value);
+
+                result = await _channel.ProcessMessageAsync(request.BuildMessage(), ProtocolType.PComA, _unitId, _timeout, _retries, cancellationToken);
+
+                request.ValidateResponseMessage(result.ResponseMessage);
             }
             else
             {
-                requestMessage = PComA.BuildWriteOperandMessage(_unitId, type, address, value);
-                protocolType = ProtocolType.PComA;
+                PComA.WriteOperandRequest request = PComA.WriteOperandRequest.CreateNew(this, type, address, value);
+
+                result = await _channel.ProcessMessageAsync(request.BuildMessage(), ProtocolType.PComA, _unitId, _timeout, _retries, cancellationToken);
+
+                request.ValidateResponseMessage(result.ResponseMessage);
             }
 
-            ProcessMessageResult result = await _channel.ProcessMessageAsync(requestMessage, protocolType, _unitId, _timeout, _retries, cancellationToken);
-
-            if (protocolType == ProtocolType.PComA)
-            {
-                PComA.ValidateWriteOperandMessage(_unitId, type, result.ResponseMessage);
-            }
-            else if (protocolType == ProtocolType.PComB)
-            {
-                PComB.ValidateWriteOperandMessage(_unitId, type, result.ResponseMessage);
-            }
-
-            return new WriteOperandResult
-            {
-                BytesSent = result.BytesSent,
-                PacketsSent = result.PacketsSent,
-                BytesReceived = result.BytesReceived,
-                PacketsReceived = result.PacketsReceived,
-                Duration = result.Duration,
-            };
+            return new WriteOperandResult(result);
         }
 
         public async Task<ReadClockResult> ReadClockAsync(CancellationToken cancellationToken)
@@ -382,21 +420,13 @@ namespace RICADO.Unitronics
                 }
             }
 
-            ReadOnlyMemory<byte> requestMessage = PComA.BuildReadClockMessage(_unitId);
+            PComA.ReadClockRequest request = PComA.ReadClockRequest.CreateNew(this);
 
-            ProcessMessageResult result = await _channel.ProcessMessageAsync(requestMessage, ProtocolType.PComA, _unitId, _timeout, _retries, cancellationToken);
+            ProcessMessageResult result = await _channel.ProcessMessageAsync(request.BuildMessage(), ProtocolType.PComA, _unitId, _timeout, _retries, cancellationToken);
 
-            DateTime dateTime = PComA.UnpackReadClockMessage(_unitId, result.ResponseMessage);
+            PComA.ReadClockResponse response = request.UnpackResponseMessage(result.ResponseMessage);
 
-            return new ReadClockResult
-            {
-                BytesSent = result.BytesSent,
-                PacketsSent = result.PacketsSent,
-                BytesReceived = result.BytesReceived,
-                PacketsReceived = result.PacketsReceived,
-                Duration = result.Duration,
-                Clock = dateTime,
-            };
+            return new ReadClockResult(result, response.DateTime);
         }
 
         public async Task<WriteClockResult> WriteClockAsync(DateTime newDateTime, CancellationToken cancellationToken)
@@ -423,20 +453,13 @@ namespace RICADO.Unitronics
                 throw new ArgumentOutOfRangeException(nameof(newDateTime), "The Date Time Value cannot be greater than '" + maxDateTime.ToString() + "'");
             }
 
-            ReadOnlyMemory<byte> requestMessage = PComA.BuildWriteClockMessage(_unitId, newDateTime);
+            PComA.WriteClockRequest request = PComA.WriteClockRequest.CreateNew(this, newDateTime);
 
-            ProcessMessageResult result = await _channel.ProcessMessageAsync(requestMessage, ProtocolType.PComA, _unitId, _timeout, _retries, cancellationToken);
+            ProcessMessageResult result = await _channel.ProcessMessageAsync(request.BuildMessage(), ProtocolType.PComA, _unitId, _timeout, _retries, cancellationToken);
 
-            PComA.ValidateWriteClockMessage(_unitId, result.ResponseMessage);
+            request.ValidateResponseMessage(result.ResponseMessage);
 
-            return new WriteClockResult
-            {
-                BytesSent = result.BytesSent,
-                PacketsSent = result.PacketsSent,
-                BytesReceived = result.BytesReceived,
-                PacketsReceived = result.PacketsReceived,
-                Duration = result.Duration,
-            };
+            return new WriteClockResult(result);
         }
 
         #endregion
@@ -446,45 +469,17 @@ namespace RICADO.Unitronics
 
         private async Task requestControllerInformation(CancellationToken cancellationToken)
         {
-            ReadOnlyMemory<byte> requestMessage = PComA.BuildGetIdentificationMessage(_unitId);
+            PComA.GetIdentificationRequest request = PComA.GetIdentificationRequest.CreateNew(this);
 
-            ProcessMessageResult result = await _channel.ProcessMessageAsync(requestMessage, ProtocolType.PComA, _unitId, _timeout, _retries, cancellationToken);
+            ProcessMessageResult result = await _channel.ProcessMessageAsync(request.BuildMessage(), ProtocolType.PComA, _unitId, _timeout, _retries, cancellationToken);
 
             try
             {
-                string oldVersionRegex = "^(.{4})(.)(.{3})(.{3})(.{2})B(.{3})(.{3})(.{2})P(.{3})(.{3})(.{2})F(.)(.)(.{2}).{2}(.{2})(FT(.{5})(.{5}))?$";
-                string newVersionRegex = "^(.{6})(.)(.{3})(.{3})(.{2})B(.{3})(.{3})(.{2})P(.{3})(.{3})(.{2})F(.)(.)(.{2}).{2}(.{2})(FT(.{5})(.{5}))?$";
-                string shortVersionRegex = "^(.{4})(.)(.)(.{2})(.{2})$";
-                
-                string informationString = PComA.UnpackGetIdentificationMessage(_unitId, result.ResponseMessage);
+                PComA.GetIdentificationResponse response = request.UnpackResponseMessage(result.ResponseMessage);
 
-                string[] splitInformation;
+                _version = response.Version;
 
-                if(Regex.IsMatch(informationString, oldVersionRegex))
-                {
-                    splitInformation = Regex.Split(informationString, oldVersionRegex);
-                }
-                else if(Regex.IsMatch(informationString, newVersionRegex))
-                {
-                    splitInformation = Regex.Split(informationString, newVersionRegex);
-                }
-                else if(Regex.IsMatch(informationString, shortVersionRegex))
-                {
-                    splitInformation = Regex.Split(informationString, shortVersionRegex);
-                }
-                else
-                {
-                    throw new PComAException("The Controller Information String Format was Invalid");
-                }
-
-                if(int.TryParse(splitInformation[3], out int majorVersion) == false || int.TryParse(splitInformation[4], out int minorVersion) == false || int.TryParse(splitInformation[5], out int buildVersion) == false)
-                {
-                    throw new PComAException("The Controller Information Version Strings were Invalid");
-                }
-
-                _version = new Version(majorVersion, minorVersion, buildVersion);
-
-                _model = extractPLCModel(splitInformation[1]);
+                _model = response.Model;
             }
             catch (Exception e)
             {
@@ -497,238 +492,6 @@ namespace RICADO.Unitronics
                     throw new UnitronicsException("Failed to Extract the Controller Information for Unitronics PLC ID '" + _unitId + "' on '" + _remoteHost + ":" + _port + "'", e);
                 }
             }
-        }
-
-        private PLCModel extractPLCModel(string modelString)
-        {
-            if(modelString == null || modelString.Length < 4)
-            {
-                return PLCModel.Unknown;
-            }
-
-            if(modelString.Contains("BOOT"))
-            {
-                return PLCModel.Unknown;
-            }
-            
-            switch(modelString)
-            {
-                case "B1  ":
-                case "B1A ":
-                case "R1  ":
-                case "R1C ":
-                case "R2C ":
-                case "T   ":
-                case "T1  ":
-                case "T1C ":
-                case "TA2C":
-                case "TA3C":
-                case "7B1 ":
-                case "7B1A":
-                case "7R1":
-                case "7R1C":
-                case "7T  ":
-                case "7T1 ":
-                case "7T1C":
-                case "7TA2":
-                case "7TA3":
-                    return PLCModel.M90;
-
-                case "1TC2":
-                case "1UN2":
-                case "1R1 ":
-                case "1R2 ":
-                case "1R2C":
-                case "1T1 ":
-                case "1UA2":
-                case "1T2C":
-                case "8TC2":
-                case "8UN2":
-                case "8R1 ":
-                case "8R2 ":
-                case "8R2C":
-                case "8T1 ":
-                case "8UA2":
-                case "8T38":
-                case "8T2C":
-                case "8R6C":
-                case "8R34":
-                case "8A19":
-                case "8A22":
-                case "1T38":
-                case "8RZ ":
-                    return PLCModel.M91;
-
-                case "JR14":
-                case "JR17":
-                case "JR10":
-                case "JR16":
-                case "JT10":
-                case "JT17":
-                case "JEW1":
-                case "JE10":
-                case "JR31":
-                case "JT40":
-                case "JP15":
-                case "JE13":
-                case "JA24":
-                case "JN20":
-                case "NR10":
-                case "NR16":
-                case "NR31":
-                case "NT10":
-                case "NT18":
-                case "NT20":
-                case "NT40":
-                    return PLCModel.Jazz;
-
-                case "2320":
-                    return PLCModel.V230;
-
-                case "2620":
-                    return PLCModel.V260;
-
-                case "2820":
-                    return PLCModel.V280;
-
-                case "2920":
-                    return PLCModel.V290;
-
-                case "VUN2":
-                case "VR1 ":
-                case "VR2C":
-                case "VUA2":
-                case "VT1 ":
-                case "VT40":
-                case "VT2C":
-                case "VT38":
-                case "WUN2":
-                case "WR1 ":
-                case "WR2C":
-                case "WUA2":
-                case "WT1 ":
-                case "WT40":
-                case "WT2C":
-                case "WT38":
-                case "WR6C":
-                case "WR34":
-                case "WA19":
-                case "WA22":
-                    return PLCModel.V120;
-
-                case "ERC1":
-                    return PLCModel.EX_RC1;
-
-                case "5320":
-                    return PLCModel.V530;
-
-                case "49C3":
-                case "57C3":
-                case "49T3":
-                case "57T3":
-                case "49T2":
-                case "57T2":
-                case "49T4":
-                case "57T4":
-                    return PLCModel.V570;
-
-                case "56C3":
-                case "56T4":
-                case "56T3":
-                case "56T2":
-                    return PLCModel.V560;
-
-                case "13R2  ":
-                case "13R34 ":
-                case "13T2  ":
-                case "13T38 ":
-                case "13RA22":
-                case "13TA24":
-                case "13B1  ":
-                case "13T40 ":
-                case "13R6  ":
-                case "13TR34":
-                case "13TR22":
-                case "13TR20":
-                case "13TR6 ":
-                case "13TU24":
-                case "13XXXX":
-                    return PLCModel.V130;
-
-                case "35R2  ":
-                case "35R34 ":
-                case "35T2  ":
-                case "35T38 ":
-                case "35RA22":
-                case "35TA24":
-                case "35B1  ":
-                case "35T40 ":
-                case "35R6  ":
-                case "35TR34":
-                case "35TR22":
-                case "35TR20":
-                case "35TR6 ":
-                case "35TU24":
-                case "35XXXX":
-                    return PLCModel.V350;
-
-                case "43RH2 ":
-                    return PLCModel.V430;
-
-                case "S3T20 ":
-                case "S3TA2 ":
-                case "S3R20 ":
-                    return PLCModel.Samba35;
-
-                case "S4T20 ":
-                case "S4TA2 ":
-                case "S4R20 ":
-                    return PLCModel.Samba43;
-
-                case "70T2":
-                    return PLCModel.V700;
-
-                case "EC15  ":
-                    return PLCModel.EXF_RC15;
-
-                case "10T2":
-                    return PLCModel.V1040;
-
-                case "12T2":
-                    return PLCModel.V1210;
-            }
-
-            if(modelString.StartsWith("13"))
-            {
-                return PLCModel.V130;
-            }
-
-            if(modelString.StartsWith("35"))
-            {
-                return PLCModel.V350;
-            }
-
-            if(modelString.StartsWith("43"))
-            {
-                return PLCModel.V430;
-            }
-
-            if(modelString.StartsWith("S3"))
-            {
-                return PLCModel.Samba35;
-            }
-
-            if(modelString.StartsWith("S4"))
-            {
-                return PLCModel.Samba43;
-            }
-
-            if(modelString.StartsWith("S7") || modelString.StartsWith("SO"))
-            {
-                return PLCModel.Samba70;
-            }
-
-            return PLCModel.Unknown;
         }
 
         private void validateOperandsRequest(OperandType type, ICollection<ushort> addresses)
@@ -1075,11 +838,11 @@ namespace RICADO.Unitronics
                 case OperandType.XI:
                 case OperandType.CounterCurrent:
                 case OperandType.CounterPreset:
-                    if (value.IsNumeric() == false)
+                    if (isNumeric(value) == false)
                     {
                         throw new UnitronicsException("Invalid Value Type '" + value.GetType() + "' for the '" + type + "' Operand Type");
                     }
-                    else if(value.TryGetValue<short>(out _) == false)
+                    else if(value.TryConvertValue<short>(out _) == false)
                     {
                         throw new UnitronicsException("The Value must be between '" + short.MinValue + "' and '" + short.MaxValue + "' for the '" + type + "' Operand Type");
                     }
@@ -1088,11 +851,11 @@ namespace RICADO.Unitronics
                 case OperandType.ML:
                 case OperandType.SL:
                 case OperandType.XL:
-                    if (value.IsNumeric() == false)
+                    if (isNumeric(value) == false)
                     {
                         throw new UnitronicsException("Invalid Value Type '" + value.GetType() + "' for the '" + type + "' Operand Type");
                     }
-                    else if (value.TryGetValue<int>(out _) == false)
+                    else if (value.TryConvertValue<int>(out _) == false)
                     {
                         throw new UnitronicsException("The Value must be between '" + int.MinValue + "' and '" + int.MaxValue + "' for the '" + type + "' Operand Type");
                     }
@@ -1101,22 +864,22 @@ namespace RICADO.Unitronics
                 case OperandType.DW:
                 case OperandType.SDW:
                 case OperandType.XDW:
-                    if (value.IsNumeric() == false)
+                    if (isNumeric(value) == false)
                     {
                         throw new UnitronicsException("Invalid Value Type '" + value.GetType() + "' for the '" + type + "' Operand Type");
                     }
-                    else if (value.TryGetValue<uint>(out _) == false)
+                    else if (value.TryConvertValue<uint>(out _) == false)
                     {
                         throw new UnitronicsException("The Value must be between '" + uint.MinValue + "' and '" + uint.MaxValue + "' for the '" + type + "' Operand Type");
                     }
                     break;
 
                 case OperandType.MF:
-                    if (value.IsNumeric() == false)
+                    if (isNumeric(value) == false)
                     {
                         throw new UnitronicsException("Invalid Value Type '" + value.GetType() + "' for the '" + type + "' Operand Type");
                     }
-                    else if (value.TryGetValue<float>(out _) == false)
+                    else if (value.TryConvertValue<float>(out _) == false)
                     {
                         throw new UnitronicsException("The Value must be between '" + float.MinValue + "' and '" + float.MaxValue + "' for the '" + type + "' Operand Type");
                     }
@@ -1124,20 +887,48 @@ namespace RICADO.Unitronics
 
                 case OperandType.TimerCurrent:
                 case OperandType.TimerPreset:
-                    if(value is TimeSpan timeSpanValue)
+                    if(value is TimeSpan timeSpanValue && timeSpanValue.TotalMilliseconds > MaximumTimerValue)
                     {
-                        // TODO: Validate the Maximum Value for a Timer
+                        throw new UnitronicsException("The Value must be between '" + TimeSpan.FromMilliseconds(uint.MinValue) + "' and '" + TimeSpan.FromMilliseconds(MaximumTimerValue) + "' for the '" + type + "' Operand Type");
                     }
-                    else if(value.IsNumeric() == false)
+                    else if(isNumeric(value) == false)
                     {
                         throw new UnitronicsException("Invalid Value Type '" + value.GetType() + "' for the '" + type + "' Operand Type");
                     }
-                    else if(value.TryGetValue<uint>(out _) == false) // TODO: Validate the correct Maximum Value for a Timer
+                    else if(value.TryConvertValue(out uint timerValue) == false || timerValue > MaximumTimerValue)
                     {
-                        throw new UnitronicsException("The Value must be between '" + uint.MinValue + "' and '" + uint.MaxValue + "' for the '" + type + "' Operand Type");
+                        throw new UnitronicsException("The Value must be between '" + uint.MinValue + "' and '" + MaximumTimerValue + "' for the '" + type + "' Operand Type");
                     }
                     break;
             }
+        }
+
+        private bool isNumeric(object value)
+        {
+            if (value == null)
+            {
+                return false;
+            }
+
+            switch (Type.GetTypeCode(value.GetType()))
+            {
+                case TypeCode.Boolean:
+                case TypeCode.Byte:
+                case TypeCode.Char:
+                case TypeCode.Decimal:
+                case TypeCode.Double:
+                case TypeCode.Int16:
+                case TypeCode.Int32:
+                case TypeCode.Int64:
+                case TypeCode.SByte:
+                case TypeCode.Single:
+                case TypeCode.UInt16:
+                case TypeCode.UInt32:
+                case TypeCode.UInt64:
+                    return true;
+            }
+
+            return false;
         }
 
         #endregion

@@ -1,11 +1,13 @@
 ﻿namespace RICADO.Unitronics
 {
-    public struct WriteClockResult
+    public class WriteClockResult : RequestResult
     {
-        public int BytesSent;
-        public int PacketsSent;
-        public int BytesReceived;
-        public int PacketsReceived;
-        public double Duration;
+        #region Constructor
+
+        internal WriteClockResult(Channels.ProcessMessageResult result) : base(result)
+        {
+        }
+
+        #endregion
     }
 }

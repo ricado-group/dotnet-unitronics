@@ -5,7 +5,6 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using RICADO.Sockets;
-using RICADO.Unitronics.Protocols;
 
 namespace RICADO.Unitronics.Channels
 {
@@ -353,20 +352,6 @@ namespace RICADO.Unitronics.Channels
                     throw new UnitronicsException("Failed to Receive " + protocol + " Message from Unitronics PLC ID '" + unitId + "' on '" + RemoteHost + ":" + Port + "' - No Data was Received");
                 }
 
-                // TODO: Perform the below in the PComA Protocol Handling!
-
-                /*int stxIndex = receivedString.IndexOf(PComA.STXResponse);
-
-                receivedString = receivedString.Substring(stxIndex, receivedString.Length - stxIndex);
-
-                int etxIndex = receivedString.IndexOf(PComA.ETX);
-
-                receivedString = receivedString.Substring(0, etxIndex + 1);
-
-                receivedData = Encoding.ASCII.GetBytes(receivedString).ToList();*/
-                
-                // TODO: Do a similar thing for PComB but in both cases use ReadOnlyMemory or Spans instead of Strings
-
                 if (receiveCompleted == false)
                 {
                     throw new UnitronicsException("Failed to Receive " + protocol + " Message within the Timeout Period from Unitronics PLC ID '" + unitId + "' on '" + RemoteHost + ":" + Port + "'");
@@ -397,14 +382,14 @@ namespace RICADO.Unitronics.Channels
                 return false;
             }
 
-            ReadOnlySpan<byte> stxPattern = protocol == ProtocolType.PComA ? PComA.STXResponse : PComB.STX;
+            ReadOnlySpan<byte> stxPattern = protocol == ProtocolType.PComA ? PComA.Response.STX : PComB.Response.STX;
 
             if(receivedData.ContainsPattern(stxPattern) == false)
             {
                 return false;
             }
 
-            byte etxByte = protocol == ProtocolType.PComA ? (byte)PComA.ETX : PComB.ETX;
+            byte etxByte = protocol == ProtocolType.PComA ? PComA.Response.ETX : PComB.Response.ETX;
 
             if(receivedData.Contains(etxByte) == false)
             {
@@ -418,19 +403,19 @@ namespace RICADO.Unitronics.Channels
 
             int stxIndex = receivedData.IndexOf(stxPattern);
 
-            if(receivedData.Count < stxIndex + PComB.HeaderLength)
+            if(receivedData.Count < stxIndex + PComB.Response.HeaderLength)
             {
                 return false;
             }
 
             ushort messageDataLength = BitConverter.ToUInt16(receivedData.GetRange(stxIndex + 20, 2).ToArray());
 
-            if(receivedData.Count < messageDataLength + PComB.HeaderLength + PComB.FooterLength)
+            if(receivedData.Count < messageDataLength + PComB.Response.HeaderLength + PComB.Response.FooterLength)
             {
                 return false;
             }
 
-            if(receivedData.ElementAt(stxIndex + PComB.HeaderLength + messageDataLength + PComB.FooterLength - 1) != PComB.ETX)
+            if(receivedData.ElementAt(stxIndex + PComB.Response.HeaderLength + messageDataLength + PComB.Response.FooterLength - 1) != PComB.Response.ETX)
             {
                 return false;
             }
@@ -445,13 +430,13 @@ namespace RICADO.Unitronics.Channels
                 return Memory<byte>.Empty;
             }
 
-            ReadOnlySpan<byte> stxPattern = protocol == ProtocolType.PComA ? PComA.STXResponse : PComB.STX;
+            ReadOnlySpan<byte> stxPattern = protocol == ProtocolType.PComA ? PComA.Response.STX : PComB.Response.STX;
 
             int stxIndex = receivedData.IndexOf(stxPattern);
 
             if (protocol == ProtocolType.PComA)
             {
-                int etxIndex = receivedData.IndexOf((byte)PComA.ETX);
+                int etxIndex = receivedData.IndexOf(PComA.Response.ETX);
 
                 return receivedData.GetRange(stxIndex, etxIndex - stxIndex + 1).ToArray();
             }
@@ -459,7 +444,7 @@ namespace RICADO.Unitronics.Channels
             {
                 ushort messageDataLength = BitConverter.ToUInt16(receivedData.GetRange(stxIndex + 20, 2).ToArray());
 
-                return receivedData.GetRange(stxIndex, PComB.HeaderLength + messageDataLength + PComB.FooterLength).ToArray();
+                return receivedData.GetRange(stxIndex, PComB.Response.HeaderLength + messageDataLength + PComB.Response.FooterLength).ToArray();
             }
         }
 

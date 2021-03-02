@@ -1,17 +1,10 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 
 namespace RICADO.Unitronics
 {
-    public class ReadOperandsResult
+    public class ReadOperandsResult : RequestResult
     {
         #region Private Fields
-
-        private int _bytesSent;
-        private int _packetsSent;
-        private int _bytesReceived;
-        private int _packetsReceived;
-        private double _duration;
 
         private readonly Dictionary<OperandType, Dictionary<ushort, object>> _operandAddressValues = new Dictionary<OperandType, Dictionary<ushort, object>>();
 
@@ -20,17 +13,16 @@ namespace RICADO.Unitronics
 
         #region Public Properties
 
-        public int BytesSent => _bytesSent;
-
-        public int PacketsSent => _packetsSent;
-
-        public int BytesReceived => _bytesReceived;
-
-        public int PacketsReceived => _packetsReceived;
-
-        public double Duration => _duration;
-
         public Dictionary<OperandType, Dictionary<ushort, object>> OperandAddressValues => _operandAddressValues;
+
+        #endregion
+
+
+        #region Constructor
+
+        internal ReadOperandsResult() : base()
+        {
+        }
 
         #endregion
 
@@ -46,7 +38,7 @@ namespace RICADO.Unitronics
                 return false;
             }
 
-            return _operandAddressValues[type][address].TryGetValue(out value);
+            return _operandAddressValues[type][address].TryConvertValue(out value);
         }
 
         public bool TryGetValue(OperandType type, ushort address, out object value)
@@ -75,19 +67,23 @@ namespace RICADO.Unitronics
                 _operandAddressValues.Add(type, new Dictionary<ushort, object>());
             }
 
-            if (_operandAddressValues[type].ContainsKey(address) == false)
-            {
-                _operandAddressValues[type].Add(address, value);
-            }
+            _operandAddressValues[type].TryAdd(address, value);
         }
 
-        internal void AddMessageResult(Channels.ProcessMessageResult result)
+        internal void AddValueRange(Dictionary<OperandType, Dictionary<ushort, object>> operandAddressValues)
         {
-            _bytesSent += result.BytesSent;
-            _packetsSent += result.PacketsSent;
-            _bytesReceived += result.BytesReceived;
-            _packetsReceived += result.PacketsReceived;
-            _duration += result.Duration;
+            foreach(OperandType type in operandAddressValues.Keys)
+            {
+                if(_operandAddressValues.ContainsKey(type) == false)
+                {
+                    _operandAddressValues.Add(type, new Dictionary<ushort, object>());
+                }
+
+                foreach(ushort address in operandAddressValues[type].Keys)
+                {
+                    _operandAddressValues[type].TryAdd(address, operandAddressValues[type][address]);
+                }
+            }
         }
 
         #endregion
