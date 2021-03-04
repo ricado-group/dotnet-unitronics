@@ -19,9 +19,7 @@ namespace RICADO.Unitronics
         SB = 11,
         XB = 12,
         Input = 13,
-        //Input = 1,
         Output = 14,
-        //Output = 2,
         TimerRunBit = 15,
         CounterRunBit = 16,
 

@@ -300,13 +300,13 @@ namespace RICADO.Unitronics
                 //
                 // NOTE: This mixed Reading Command is actually super inefficient! So we won't support it
             }
-            else if(IsEnhanced) // NOTE: Seems Standard PLCs break when using this method of communication!!!?
+            else if(IsEnhanced || IsStandard)
             {
                 foreach (PComB.ReadOperandsRequest request in PComB.ReadOperandsRequest.CreateMultiple(this, readRequest.OperandAddresses))
                 {
                     ProcessMessageResult messageResult = await _channel.ProcessMessageAsync(request.BuildMessage(), ProtocolType.PComB, _unitId, _timeout, _retries, cancellationToken);
 
-                    PComB.ReadOperandsResponse response = request.UnpackResponseMessage(messageResult.ResponseMessage);
+                    PComB.ReadOperandsResponse response = request.UnpackResponseMessage(messageResult.ResponseMessage, _connectionMethod == ConnectionMethod.Ethernet);
 
                     result.AddMessageResult(messageResult);
 
@@ -332,38 +332,6 @@ namespace RICADO.Unitronics
                         address++;
                     }
                 }
-            }
-
-            return result;
-        }
-
-        public async Task<ReadOperandResult> ReadOperandAsync(OperandType type, ushort address, CancellationToken cancellationToken)
-        {
-            lock (_isInitializedLock)
-            {
-                if (_isInitialized == false)
-                {
-                    throw new UnitronicsException("This Unitronics PLC must be Initialized first before any Requests can be Processed");
-                }
-            }
-
-            validateOperandsRequest(type, new ushort[] { address });
-
-            ReadOperandResult result;
-
-            if ((IsEnhanced && Version.Major >= 3) || (IsStandard && Version.Major >= 5 && Version.Minor >= 3))
-            {
-                throw new NotImplementedException();
-            }
-            else
-            {
-                PComA.ReadOperandsRequest request = PComA.ReadOperandsRequest.CreateNew(this, type, address, 1);
-
-                ProcessMessageResult messageResult = await _channel.ProcessMessageAsync(request.BuildMessage(), ProtocolType.PComA, _unitId, _timeout, _retries, cancellationToken);
-
-                PComA.ReadOperandsResponse response = request.UnpackResponseMessage(messageResult.ResponseMessage);
-
-                result = new ReadOperandResult(messageResult, response.Values[0]);
             }
 
             return result;
@@ -396,7 +364,7 @@ namespace RICADO.Unitronics
 
                 result = await _channel.ProcessMessageAsync(request.BuildMessage(), ProtocolType.PComB, _unitId, _timeout, _retries, cancellationToken);
 
-                request.ValidateResponseMessage(result.ResponseMessage, IsStandard);
+                request.ValidateResponseMessage(result.ResponseMessage, _connectionMethod == ConnectionMethod.Ethernet);
             }
             else
             {
@@ -465,6 +433,251 @@ namespace RICADO.Unitronics
         #endregion
 
 
+        #region Internal Methods
+
+        internal ushort? GetMaximumOperandAddress(OperandType type)
+        {
+            if (_model == PLCModel.Unknown)
+            {
+                return null;
+            }
+
+            if (IsBasic)
+            {
+                switch (type)
+                {
+                    case OperandType.MB:
+                    case OperandType.SB:
+                    case OperandType.MI:
+                    case OperandType.SI:
+                        return 255;
+
+                    case OperandType.Input:
+                    case OperandType.Output:
+                        return 159;
+
+                    case OperandType.TimerCurrent:
+                    case OperandType.TimerPreset:
+                    case OperandType.TimerRunBit:
+                        return 63;
+                }
+            }
+
+            if (IsStandard)
+            {
+                switch (type)
+                {
+                    case OperandType.MB:
+                        return 4095;
+
+                    case OperandType.MI:
+                        return 2047;
+
+                    case OperandType.SB:
+                    case OperandType.SI:
+                        return 511;
+
+                    case OperandType.ML:
+                        return 255;
+
+                    case OperandType.SL:
+                        return 55;
+
+                    case OperandType.MF:
+                        return 23;
+
+                    case OperandType.DW:
+                    case OperandType.SDW:
+                        return 63;
+
+                    case OperandType.Input:
+                    case OperandType.Output:
+                        return 543;
+
+                    case OperandType.TimerCurrent:
+                    case OperandType.TimerPreset:
+                    case OperandType.TimerRunBit:
+                        return 191;
+
+                    case OperandType.CounterCurrent:
+                    case OperandType.CounterPreset:
+                    case OperandType.CounterRunBit:
+                        return 23;
+                }
+            }
+
+            if (IsEnhanced)
+            {
+                if (_model == PLCModel.V130 || _model == PLCModel.EXF_RC15)
+                {
+                    switch (type)
+                    {
+                        case OperandType.MB:
+                            return 4095;
+
+                        case OperandType.MI:
+                            return 2047;
+
+                        case OperandType.SB:
+                        case OperandType.SI:
+                            return 511;
+
+                        case OperandType.ML:
+                            return 255;
+
+                        case OperandType.SL:
+                            return 55;
+
+                        case OperandType.MF:
+                            return 23;
+
+                        case OperandType.DW:
+                        case OperandType.SDW:
+                            return 63;
+
+                        case OperandType.Input:
+                        case OperandType.Output:
+                            return 543;
+
+                        case OperandType.TimerCurrent:
+                        case OperandType.TimerPreset:
+                        case OperandType.TimerRunBit:
+                            return 191;
+
+                        case OperandType.CounterCurrent:
+                        case OperandType.CounterPreset:
+                        case OperandType.CounterRunBit:
+                            return 23;
+
+                        case OperandType.XB:
+                            return 1023;
+
+                        case OperandType.XI:
+                            return 511;
+
+                        case OperandType.XL:
+                            return 255;
+
+                        case OperandType.XDW:
+                            return 63;
+                    }
+                }
+                else if (_model == PLCModel.Samba35 || _model == PLCModel.Samba43 || _model == PLCModel.Samba70)
+                {
+                    switch (type)
+                    {
+                        case OperandType.MB:
+                            return 511;
+
+                        case OperandType.MI:
+                            return 255;
+
+                        case OperandType.SB:
+                        case OperandType.SI:
+                            return 511;
+
+                        case OperandType.ML:
+                            return 31;
+
+                        case OperandType.SL:
+                            return 55;
+
+                        case OperandType.MF:
+                            return 23;
+
+                        case OperandType.DW:
+                            return 31;
+
+                        case OperandType.SDW:
+                            return 63;
+
+                        case OperandType.Input:
+                        case OperandType.Output:
+                            return 271;
+
+                        case OperandType.TimerCurrent:
+                        case OperandType.TimerPreset:
+                        case OperandType.TimerRunBit:
+                            return 31;
+
+                        case OperandType.CounterCurrent:
+                        case OperandType.CounterPreset:
+                        case OperandType.CounterRunBit:
+                            return 15;
+
+                        case OperandType.XB:
+                            return 63;
+
+                        case OperandType.XI:
+                            return 31;
+
+                        case OperandType.XL:
+                            return 15;
+
+                        case OperandType.XDW:
+                            return 15;
+                    }
+                }
+                else
+                {
+                    switch (type)
+                    {
+                        case OperandType.MB:
+                            return 8191;
+
+                        case OperandType.MI:
+                            return 4095;
+
+                        case OperandType.SB:
+                        case OperandType.SI:
+                        case OperandType.ML:
+                            return 511;
+
+                        case OperandType.SL:
+                            return 55;
+
+                        case OperandType.MF:
+                        case OperandType.SDW:
+                            return 63;
+
+                        case OperandType.DW:
+                            return 255;
+
+                        case OperandType.Input:
+                        case OperandType.Output:
+                            return 543;
+
+                        case OperandType.TimerCurrent:
+                        case OperandType.TimerPreset:
+                        case OperandType.TimerRunBit:
+                            return 383;
+
+                        case OperandType.CounterCurrent:
+                        case OperandType.CounterPreset:
+                        case OperandType.CounterRunBit:
+                            return 31;
+
+                        case OperandType.XB:
+                            return 1023;
+
+                        case OperandType.XI:
+                            return 511;
+
+                        case OperandType.XL:
+                            return 255;
+
+                        case OperandType.XDW:
+                            return 63;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        #endregion
+
+
         #region Private Methods
 
         private async Task requestControllerInformation(CancellationToken cancellationToken)
@@ -501,311 +714,16 @@ namespace RICADO.Unitronics
                 return;
             }
 
-            ushort maximumAddress = ushort.MaxValue;
-            
-            if(IsBasic)
+            ushort? maximumAddress = GetMaximumOperandAddress(type);
+
+            if(maximumAddress.HasValue == false)
             {
-                switch(type)
-                {
-                    case OperandType.MB:
-                    case OperandType.SB:
-                    case OperandType.MI:
-                    case OperandType.SI:
-                        maximumAddress = 255;
-                        break;
-
-                    case OperandType.Input:
-                    case OperandType.Output:
-                        maximumAddress = 159;
-                        break;
-
-                    case OperandType.TimerCurrent:
-                    case OperandType.TimerPreset:
-                    case OperandType.TimerRunBit:
-                        maximumAddress = 63;
-                        break;
-
-                    default:
-                        throw new UnitronicsException("The '" + type + "' Operand Type is not supported by this '" + _model + "' Unitronics PLC");
-                }
+                throw new UnitronicsException("The '" + type + "' Operand Type is not supported by this '" + _model + "' Unitronics PLC");
             }
 
-            if(IsStandard)
+            if(addresses.Max() > maximumAddress.Value)
             {
-                switch (type)
-                {
-                    case OperandType.MB:
-                        maximumAddress = 4095;
-                        break;
-
-                    case OperandType.MI:
-                        maximumAddress = 2047;
-                        break;
-
-                    case OperandType.SB:
-                    case OperandType.SI:
-                        maximumAddress = 511;
-                        break;
-
-                    case OperandType.ML:
-                        maximumAddress = 255;
-                        break;
-
-                    case OperandType.SL:
-                        maximumAddress = 55;
-                        break;
-
-                    case OperandType.MF:
-                        maximumAddress = 23;
-                        break;
-
-                    case OperandType.DW:
-                    case OperandType.SDW:
-                        maximumAddress = 63;
-                        break;
-
-                    case OperandType.Input:
-                    case OperandType.Output:
-                        maximumAddress = 543;
-                        break;
-
-                    case OperandType.TimerCurrent:
-                    case OperandType.TimerPreset:
-                    case OperandType.TimerRunBit:
-                        maximumAddress = 191;
-                        break;
-
-                    case OperandType.CounterCurrent:
-                    case OperandType.CounterPreset:
-                    case OperandType.CounterRunBit:
-                        maximumAddress = 23;
-                        break;
-
-                    default:
-                        throw new UnitronicsException("The '" + type + "' Operand Type is not supported by this '" + _model + "' Unitronics PLC");
-                }
-            }
-
-            if(IsEnhanced)
-            {
-                if(_model == PLCModel.V130 || _model == PLCModel.EXF_RC15)
-                {
-                    switch (type)
-                    {
-                        case OperandType.MB:
-                            maximumAddress = 4095;
-                            break;
-
-                        case OperandType.MI:
-                            maximumAddress = 2047;
-                            break;
-
-                        case OperandType.SB:
-                        case OperandType.SI:
-                            maximumAddress = 511;
-                            break;
-
-                        case OperandType.ML:
-                            maximumAddress = 255;
-                            break;
-
-                        case OperandType.SL:
-                            maximumAddress = 55;
-                            break;
-
-                        case OperandType.MF:
-                            maximumAddress = 23;
-                            break;
-
-                        case OperandType.DW:
-                        case OperandType.SDW:
-                            maximumAddress = 63;
-                            break;
-
-                        case OperandType.Input:
-                        case OperandType.Output:
-                            maximumAddress = 543;
-                            break;
-
-                        case OperandType.TimerCurrent:
-                        case OperandType.TimerPreset:
-                        case OperandType.TimerRunBit:
-                            maximumAddress = 191;
-                            break;
-
-                        case OperandType.CounterCurrent:
-                        case OperandType.CounterPreset:
-                        case OperandType.CounterRunBit:
-                            maximumAddress = 23;
-                            break;
-
-                        case OperandType.XB:
-                            maximumAddress = 1023;
-                            break;
-
-                        case OperandType.XI:
-                            maximumAddress = 511;
-                            break;
-
-                        case OperandType.XL:
-                            maximumAddress = 255;
-                            break;
-
-                        case OperandType.XDW:
-                            maximumAddress = 63;
-                            break;
-
-                        default:
-                            throw new UnitronicsException("The '" + type + "' Operand Type is not supported by this '" + _model + "' Unitronics PLC");
-                    }
-                }
-                else if (_model == PLCModel.Samba35 || _model == PLCModel.Samba43 || _model == PLCModel.Samba70)
-                {
-                    switch (type)
-                    {
-                        case OperandType.MB:
-                            maximumAddress = 511;
-                            break;
-
-                        case OperandType.MI:
-                            maximumAddress = 255;
-                            break;
-
-                        case OperandType.SB:
-                        case OperandType.SI:
-                            maximumAddress = 511;
-                            break;
-
-                        case OperandType.ML:
-                            maximumAddress = 31;
-                            break;
-
-                        case OperandType.SL:
-                            maximumAddress = 55;
-                            break;
-
-                        case OperandType.MF:
-                            maximumAddress = 23;
-                            break;
-
-                        case OperandType.DW:
-                            maximumAddress = 31;
-                            break;
-
-                        case OperandType.SDW:
-                            maximumAddress = 63;
-                            break;
-
-                        case OperandType.Input:
-                        case OperandType.Output:
-                            maximumAddress = 271;
-                            break;
-
-                        case OperandType.TimerCurrent:
-                        case OperandType.TimerPreset:
-                        case OperandType.TimerRunBit:
-                            maximumAddress = 31;
-                            break;
-
-                        case OperandType.CounterCurrent:
-                        case OperandType.CounterPreset:
-                        case OperandType.CounterRunBit:
-                            maximumAddress = 15;
-                            break;
-
-                        case OperandType.XB:
-                            maximumAddress = 63;
-                            break;
-
-                        case OperandType.XI:
-                            maximumAddress = 31;
-                            break;
-
-                        case OperandType.XL:
-                            maximumAddress = 15;
-                            break;
-
-                        case OperandType.XDW:
-                            maximumAddress = 15;
-                            break;
-
-                        default:
-                            throw new UnitronicsException("The '" + type + "' Operand Type is not supported by this '" + _model + "' Unitronics PLC");
-                    }
-                }
-                else
-                {
-                    switch (type)
-                    {
-                        case OperandType.MB:
-                            maximumAddress = 8191;
-                            break;
-
-                        case OperandType.MI:
-                            maximumAddress = 4095;
-                            break;
-
-                        case OperandType.SB:
-                        case OperandType.SI:
-                        case OperandType.ML:
-                            maximumAddress = 511;
-                            break;
-
-                        case OperandType.SL:
-                            maximumAddress = 55;
-                            break;
-
-                        case OperandType.MF:
-                        case OperandType.SDW:
-                            maximumAddress = 63;
-                            break;
-
-                        case OperandType.DW:
-                            maximumAddress = 255;
-                            break;
-
-                        case OperandType.Input:
-                        case OperandType.Output:
-                            maximumAddress = 543;
-                            break;
-
-                        case OperandType.TimerCurrent:
-                        case OperandType.TimerPreset:
-                        case OperandType.TimerRunBit:
-                            maximumAddress = 383;
-                            break;
-
-                        case OperandType.CounterCurrent:
-                        case OperandType.CounterPreset:
-                        case OperandType.CounterRunBit:
-                            maximumAddress = 31;
-                            break;
-
-                        case OperandType.XB:
-                            maximumAddress = 1023;
-                            break;
-
-                        case OperandType.XI:
-                            maximumAddress = 511;
-                            break;
-
-                        case OperandType.XL:
-                            maximumAddress = 255;
-                            break;
-
-                        case OperandType.XDW:
-                            maximumAddress = 63;
-                            break;
-
-                        default:
-                            throw new UnitronicsException("The '" + type + "' Operand Type is not supported by this '" + _model + "' Unitronics PLC");
-                    }
-                }
-            }
-
-            if(addresses.Max() > maximumAddress)
-            {
-                throw new UnitronicsException("The Address for an '" + type + "' Operand cannot be greater than '" + maximumAddress + "' for this '" + _model + "' Unitronics PLC");
+                throw new UnitronicsException("The Address for an '" + type + "' Operand cannot be greater than '" + maximumAddress.Value + "' for this '" + _model + "' Unitronics PLC");
             }
         }
 

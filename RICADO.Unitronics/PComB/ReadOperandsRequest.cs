@@ -8,13 +8,6 @@ namespace RICADO.Unitronics.PComB
 {
     internal class ReadOperandsRequest : Request
     {
-        #region Constants
-
-        private const byte MaximumOperandsLength = 255;
-
-        #endregion
-
-
         #region Private Fields
 
         private readonly Dictionary<OperandType, IOperandRequest> _operandRequests = new Dictionary<OperandType, IOperandRequest>();
@@ -45,21 +38,6 @@ namespace RICADO.Unitronics.PComB
             return ReadOperandsResponse.UnpackResponseMessage(this, responseMessage, disableChecksum);
         }
 
-        /*public static ReadOperandsRequest CreateNew(UnitronicsPLC plc, OperandType type, ushort startAddress, byte length)
-        {
-            if (length > MaximumOperandsLength)
-            {
-                throw new ArgumentOutOfRangeException(nameof(length), "The Number of Operands to Read cannot be greater than the Maximum Value '" + MaximumOperandsLength + "'");
-            }
-
-            byte operandLength = calculateOperandByteLength(operand);
-            int maximumReceiveLength = plc.BufferSize - Response.HeaderLength - Response.FooterLength;
-
-            if(length * operandLength > )
-
-            return new ReadOperandsRequest(plc.UnitID, Commands.ReadOperands[type], type, startAddress, length);
-        }*/
-
         public static HashSet<ReadOperandsRequest> CreateMultiple(UnitronicsPLC plc, Dictionary<OperandType, HashSet<ushort>> operandAddresses)
         {
             HashSet<ReadOperandsRequest> requests = new HashSet<ReadOperandsRequest>();
@@ -83,14 +61,7 @@ namespace RICADO.Unitronics.PComB
                         request = new ReadOperandsRequest(plc.UnitID);
                     }
 
-                    request.addOperandAddress(operand, address);
-                }
-
-                if (request != null && request.OperandRequests.Count > 0 && request.OperandRequests.Values.Any(request => request.Count > 0))
-                {
-                    requests.Add(request);
-
-                    request = null;
+                    request.addOperandAddress(plc, operand, address);
                 }
             }
 
@@ -140,32 +111,40 @@ namespace RICADO.Unitronics.PComB
 
         #region Private Methods
 
-        private void addOperandAddress(OperandType type, ushort address)
+        private void addOperandAddress(UnitronicsPLC plc, OperandType type, ushort address)
         {
+            ushort maximumAddress = plc.GetMaximumOperandAddress(type) ?? ushort.MaxValue;
+            
             if(isBitOperandType(type))
             {
                 if (_operandRequests.ContainsKey(type) == false)
                 {
-                    //_operandRequests.Add(type, new VectorialOperandRequest(type, address, 1));
-                    _operandRequests.Add(type, new VectorialOperandRequest(type, address, 8));
+                    VectorialOperandRequest newRequest = new VectorialOperandRequest(type, address, 8);
+                    
+                    if(newRequest.EndAddress > maximumAddress)
+                    {
+                        newRequest.StartAddress = (ushort)(maximumAddress - 7);
+                    }
+
+                    _operandRequests.Add(type, newRequest);
                     return;
                 }
 
-                /*if (_operandRequests.TryGetValue(type, out IOperandRequest genericRequest) && genericRequest is VectorialOperandRequest request && address >= request.StartAddress && request.Count < address - request.StartAddress + 1)
+                if (_operandRequests.TryGetValue(type, out IOperandRequest genericRequest) && genericRequest is VectorialOperandRequest existingRequest)
                 {
-                    request.Count = (ushort)(address - request.StartAddress + 1);
-                }*/
-
-                if (_operandRequests.TryGetValue(type, out IOperandRequest genericRequest) && genericRequest is VectorialOperandRequest request)
-                {
-                    if (address >= request.StartAddress && request.Count < address - request.StartAddress + 1)
+                    if (address >= existingRequest.StartAddress && address > existingRequest.EndAddress)
                     {
-                        request.Count = (ushort)(address - request.StartAddress + 1);
+                        existingRequest.Count = (ushort)(address - existingRequest.StartAddress + 1);
                     }
 
-                    if(request.Count % 8 != 0)
+                    if(existingRequest.Count % 8 != 0)
                     {
-                        request.Count = (ushort)(request.Count + (request.Count % 8));
+                        existingRequest.Count = (ushort)(existingRequest.Count + (8 - (existingRequest.Count % 8)));
+                    }
+
+                    if(existingRequest.EndAddress > maximumAddress)
+                    {
+                        existingRequest.StartAddress -= (ushort)(existingRequest.EndAddress - maximumAddress);
                     }
                 }
             }
@@ -446,7 +425,19 @@ namespace RICADO.Unitronics.PComB
 
             public OperandType Type => _type;
 
-            public ushort StartAddress => _startAddress;
+            public ushort StartAddress
+            {
+                get
+                {
+                    return _startAddress;
+                }
+                set
+                {
+                    _startAddress = value;
+                }
+            }
+
+            public ushort EndAddress => (ushort)(_startAddress + _count - 1);
 
             public ushort Count
             {
