@@ -5,11 +5,13 @@
     <Authors>RICADO Group</Authors>
     <Company>RICADO Group LP</Company>
     <Description>A Unitronics PLC Communication Library for .NET 5 Applications</Description>
+    <Copyright>Copyright © RICADO Group LP 2009 - 2021</Copyright>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
     <PackageIcon>packageIcon.png</PackageIcon>
     <RepositoryUrl>https://github.com/ricado-group/dotnet-unitronics</RepositoryUrl>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <AllowedOutputExtensionsInPackageBuildOutputFolder>$(AllowedOutputExtensionsInPackageBuildOutputFolder);.pdb</AllowedOutputExtensionsInPackageBuildOutputFolder>
   </PropertyGroup>
 
   <ItemGroup>
@@ -25,10 +27,6 @@
 
   <ItemGroup>
     <PackageReference Include="RICADO.Sockets" Version="1.0.1" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Folder Include="Requests\" />
   </ItemGroup>
 
 </Project>
