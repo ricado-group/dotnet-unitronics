@@ -98,7 +98,7 @@ namespace RICADO.Unitronics.PComB
                 case OperandType.XB:
                     if (tryGetValue(out bool boolValue))
                     {
-                        messageData.Add(boolValue == true ? 1 : 0);
+                        messageData.Add(boolValue == true ? (byte)1 : (byte)0);
                     }
                     else
                     {

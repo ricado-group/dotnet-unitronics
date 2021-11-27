@@ -44,7 +44,7 @@ namespace RICADO.Unitronics
 
         internal Guid InternalUniqueID => _internalUniqueId;
 
-        internal ushort BufferSize => IsEnhanced ? 1000 : 496;
+        internal ushort BufferSize => IsEnhanced ? (ushort)1000 : (ushort)496;
 
         internal bool IsBasic => _model switch
         {
