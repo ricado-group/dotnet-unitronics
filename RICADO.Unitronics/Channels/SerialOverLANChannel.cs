@@ -116,10 +116,13 @@ namespace RICADO.Unitronics.Channels
                 }
             }
 
-            try
+            if (!_initializeSemaphore.Wait(0))
             {
                 await _initializeSemaphore.WaitAsync(cancellationToken);
+            }
 
+            try
+            {
                 if (IsInitialized)
                 {
                     return;
@@ -165,10 +168,13 @@ namespace RICADO.Unitronics.Channels
 
             while (attempts <= retries)
             {
-                try
+                if (!_requestSemaphore.Wait(0))
                 {
                     await _requestSemaphore.WaitAsync(cancellationToken);
+                }
 
+                try
+                {
                     if (attempts > 0)
                     {
                         await destroyAndInitializeClient(unitId, timeout, cancellationToken);
